@@ -35,51 +35,36 @@ class FoxholeCVDetector:
         # -------------------------------------------------------------
         # 1. INSTANT 4-WAY MODE RECOGNITION (< 1ms)
         # -------------------------------------------------------------
-        # A. Check DEPLOY_MAP: Distinctive 'CONQUEST' header in left panel
+        # A. Sprint Stamina Bar check at [124:136, 22:145]
+        # In Foxhole, when on foot as a pedestrian, the stamina bar is a solid white bar (~120x11 = >1000px).
+        # Neither Vehicle, nor Map, nor Deploy Map ever displays this sprint stamina bar!
+        stamina_row = bgr[124:136, 22:145]
+        white_stamina = int(np.sum((stamina_row[:, :, 0] > 180) & (stamina_row[:, :, 1] > 180) & (stamina_row[:, :, 2] > 180)))
+
+        # B. Vehicle widgets (silhouette at [30:88, 30:90] or armor shield)
+        veh_crop = bgr[30:88, 30:90]
+        veh_white = int(np.sum((veh_crop[:, :, 0] > 180) & (veh_crop[:, :, 1] > 180) & (veh_crop[:, :, 2] > 180)))
+        shield_crop = bgr[768:836, 932:988]
+        white_shield = int(np.sum((shield_crop[:, :, 0] > 200) & (shield_crop[:, :, 1] > 200) & (shield_crop[:, :, 2] > 200)))
+        has_shield = (35 < white_shield < 250)
+
+        # C. Map & Deploy Map checks (only possible when stamina bar is absent)
         conquest_crop = bgr[90:130, 20:180]
         gray_c = cv2.cvtColor(conquest_crop, cv2.COLOR_BGR2GRAY)
         mask_c = gray_c > 180
         num_c, _, stats_c, _ = cv2.connectedComponentsWithStats(mask_c.astype(np.uint8))
         letters_c = [s for s in stats_c[1:] if 7 <= s[3] <= 18 and 4 <= s[2] <= 18]
-        is_deploy_map = (len(letters_c) >= 5)
+        sidebar_dark = float(np.mean(bgr[100:400, 20:340])) < 80
 
-        # B. Check MAP ('M' key tactical map):
-        # Center is full map parchment, but top-left in-game stance/vehicle is absent
-        center_crop = bgr[250:800, 450:1450]
-        center_lum = float(np.mean(center_crop))
-        tl_crop = bgr[20:80, 20:80]
-        tl_lum = float(np.mean(tl_crop))
-        tl_white = int(np.sum((tl_crop[:, :, 0] > 180) & (tl_crop[:, :, 1] > 180) & (tl_crop[:, :, 2] > 180)))
-        is_tactical_map = (not is_deploy_map) and (center_lum > 85 and tl_lum < 50 and tl_white < 50)
-
-        # C. In-Game: VEHICLE vs PEDESTRIAN
-        stamina_row = bgr[124:136, 22:145]
-        white_stamina = int(np.sum((stamina_row[:, :, 0] > 180) & (stamina_row[:, :, 1] > 180) & (stamina_row[:, :, 2] > 180)))
-        has_stamina = white_stamina > 60
-
-        veh_crop = bgr[20:110, 20:120]
-        veh_white = int(np.sum((veh_crop[:, :, 0] > 180) & (veh_crop[:, :, 1] > 180) & (veh_crop[:, :, 2] > 180)))
-
-        seat_row = bgr[95:110, 20:110]
-        seat_mask = (seat_row[:, :, 0] > 180) & (seat_row[:, :, 1] > 180) & (seat_row[:, :, 2] > 180)
-        num_seats, _, stats_seats, _ = cv2.connectedComponentsWithStats(seat_mask.astype(np.uint8))
-        seat_dots = [s for s in stats_seats[1:] if 4 <= s[3] <= 14 and 4 <= s[2] <= 14]
-
-        shield_crop = bgr[768:836, 932:988]
-        shield_white = int(np.sum((shield_crop[:, :, 0] > 200) & (shield_crop[:, :, 1] > 200) & (shield_crop[:, :, 2] > 200)))
-        has_shield = (35 < shield_white < 250)
-
-        is_vehicle = (not is_deploy_map and not is_tactical_map) and (len(seat_dots) >= 1 or has_shield or (veh_white > 300 and not has_stamina))
-
-        # Assign Mode
-        if is_deploy_map:
-            current_mode = "DEPLOY_MAP"
-        elif is_tactical_map:
-            current_mode = "MAP"
-        elif is_vehicle:
-            current_mode = "VEHICLE"
-        else:
+        # Hierarchical Assignment
+        if white_stamina > 500:
             current_mode = "PEDESTRIAN"
+        elif veh_white > 400 or has_shield:
+            current_mode = "VEHICLE"
+        elif len(letters_c) >= 5 and sidebar_dark:
+            current_mode = "DEPLOY_MAP"
+        else:
+            current_mode = "MAP"
 
         tactical_state["mode"] = current_mode
         tactical_state["is_deploy_map"] = (current_mode == "DEPLOY_MAP")
