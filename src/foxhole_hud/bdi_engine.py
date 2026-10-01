@@ -10,6 +10,7 @@ class Beliefs:
     in_vehicle: bool = False
     vehicle_role: str = "Driver"
     is_bleeding: bool = False
+    is_spectating: bool = False
     is_full_map: bool = False
     has_minimap: bool = True
     at_industrial_hub: bool = True
@@ -30,7 +31,7 @@ class BDIGoalArbiter:
     Belief-Desire-Intention (BDI) and Goal-Driven Autonomy (GDA) Engine.
     Grounded in immediate surroundings: Maiden's Veil industrial hub,
     seaport fuel deficit, and Salt March resupply mandate.
-    Instant arbitration across: DEPLOY_MAP, MAP, VEHICLE, PEDESTRIAN.
+    Instant arbitration across: SPECTATING, DEPLOY_MAP, MAP, VEHICLE, PEDESTRIAN.
     """
     def __init__(self, mcp_consultant=None, metadata_store=None):
         self.beliefs = Beliefs()
@@ -47,6 +48,7 @@ class BDIGoalArbiter:
         b = self.beliefs
         b.mode = cv_state.get("mode", "PEDESTRIAN")
         b.in_vehicle = cv_state.get("in_vehicle", (b.mode == "VEHICLE"))
+        b.is_spectating = cv_state.get("is_spectating", (b.mode == "SPECTATING"))
         b.is_bleeding = cv_state.get("is_bleeding", False)
         b.is_full_map = cv_state.get("is_full_map", (b.mode == "MAP"))
         b.has_minimap = cv_state.get("has_minimap", False)
@@ -71,7 +73,16 @@ class BDIGoalArbiter:
                 revision_trigger="Bleed Discrepancy"
             )
 
-        # Mode 1: DEPLOY_MAP (Conquest / World Respawn Screen)
+        # Mode 1: SPECTATING (Observing Ally while awaiting respawn)
+        elif b.mode == "SPECTATING" or b.is_spectating:
+            new_hierarchy = GoalHierarchy(
+                goal="Operation Cold Run: Theater Combat Observation & Respawn",
+                strategic_priority="Await Respawn Wave or Teammate Reinforcement",
+                tactical_priority="Spectating Ally: Observe enemy positions, defensive blindspots, and partisan activity while respawn timer elapses",
+                revision_trigger="Switched to SPECTATING"
+            )
+
+        # Mode 2: DEPLOY_MAP (Conquest / World Respawn Screen)
         elif b.mode == "DEPLOY_MAP":
             new_hierarchy = GoalHierarchy(
                 goal="Operation Cold Run: Theater Deployment Selection",

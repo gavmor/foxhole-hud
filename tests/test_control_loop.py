@@ -83,13 +83,24 @@ def test_cv_engine_submillisecond_roi():
     dt_ms = (time.time() - t0) * 1000
     
     assert dt_ms < 10.0
-    assert state["mode"] in ("PEDESTRIAN", "VEHICLE", "MAP", "DEPLOY_MAP")
+    assert state["mode"] in ("PEDESTRIAN", "VEHICLE", "MAP", "DEPLOY_MAP", "SPECTATING")
 
-def test_four_mode_instant_recognition():
+def test_five_mode_instant_recognition():
     detector = FoxholeCVDetector()
     arbiter = BDIGoalArbiter()
 
-    # 1. DEPLOY_MAP test (Conquest letters in left panel)
+    # 1. SPECTATING test (Spectator banner with "SPECTATING: PLAYER_NAME")
+    spec_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
+    for i, x in enumerate(range(740, 1100, 20)):
+        spec_frame[40:60, x:x+12, :3] = 255  # ~18 letters
+    boxes_s, state_s = detector.process_frame(spec_frame)
+    assert state_s["mode"] == "SPECTATING"
+    assert any("SPECTATOR CAM" in b["label"] for b in boxes_s)
+    rev_s = arbiter.update_beliefs_from_cv(state_s)
+    assert "Combat Observation" in rev_s.goal
+    assert "Spectating Ally" in rev_s.tactical_priority
+
+    # 2. DEPLOY_MAP test (Conquest letters in left panel)
     deploy_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
     # Simulate 8 letters of CONQUEST at y=100..112, x=30..150
     for i, x in enumerate(range(30, 140, 14)):
@@ -100,7 +111,7 @@ def test_four_mode_instant_recognition():
     rev_d = arbiter.update_beliefs_from_cv(state_d)
     assert "Deployment" in rev_d.goal
 
-    # 2. MAP test ('M' key tactical map)
+    # 3. MAP test ('M' key tactical map)
     map_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
     map_frame[250:800, 450:1450, :3] = 140  # Parchment canvas
     boxes_m, state_m = detector.process_frame(map_frame)
@@ -109,7 +120,7 @@ def test_four_mode_instant_recognition():
     rev_m = arbiter.update_beliefs_from_cv(state_m)
     assert "Operational Reconnaissance" in rev_m.goal
 
-    # 3. VEHICLE test (Seat dots / vehicle silhouette without stamina bar)
+    # 4. VEHICLE test (Seat dots / vehicle silhouette without stamina bar)
     veh_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
     veh_frame[20:110, 20:120, :3] = 220  # Vehicle silhouette
     veh_frame[98:108, 30:40, :3] = 255   # Seat dot 1
@@ -120,7 +131,7 @@ def test_four_mode_instant_recognition():
     rev_v = arbiter.update_beliefs_from_cv(state_v)
     assert "Dunne" in rev_v.tactical_priority
 
-    # 4. PEDESTRIAN test (Stance posture + sprint stamina bar)
+    # 5. PEDESTRIAN test (Stance posture + sprint stamina bar)
     ped_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
     ped_frame[20:80, 20:80, :3] = 220     # Stance figure
     ped_frame[124:136, 22:145, :3] = 255  # Stamina bar

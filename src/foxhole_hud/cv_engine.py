@@ -48,7 +48,15 @@ class FoxholeCVDetector:
         white_shield = int(np.sum((shield_crop[:, :, 0] > 200) & (shield_crop[:, :, 1] > 200) & (shield_crop[:, :, 2] > 200)))
         has_shield = (35 < white_shield < 250)
 
-        # C. Map & Deploy Map checks (only possible when stamina bar is absent)
+        # C. Spectator mode check (banner at [20:120, 700:1220])
+        spec_crop = bgr[20:120, 700:1220]
+        gray_s = cv2.cvtColor(spec_crop, cv2.COLOR_BGR2GRAY)
+        mask_s = gray_s > 180
+        num_s, _, stats_s, _ = cv2.connectedComponentsWithStats(mask_s.astype(np.uint8))
+        spec_letters = [s for s in stats_s[1:] if 6 <= s[3] <= 30 and 4 <= s[2] <= 30]
+        is_spectating = (int(np.sum(mask_s)) > 600 and len(spec_letters) >= 10)
+
+        # D. Map & Deploy Map checks (only possible when stamina bar is absent)
         conquest_crop = bgr[90:130, 20:180]
         gray_c = cv2.cvtColor(conquest_crop, cv2.COLOR_BGR2GRAY)
         mask_c = gray_c > 180
@@ -61,12 +69,15 @@ class FoxholeCVDetector:
             current_mode = "PEDESTRIAN"
         elif veh_white > 400 or has_shield:
             current_mode = "VEHICLE"
+        elif is_spectating:
+            current_mode = "SPECTATING"
         elif len(letters_c) >= 5 and sidebar_dark:
             current_mode = "DEPLOY_MAP"
         else:
             current_mode = "MAP"
 
         tactical_state["mode"] = current_mode
+        tactical_state["is_spectating"] = (current_mode == "SPECTATING")
         tactical_state["is_deploy_map"] = (current_mode == "DEPLOY_MAP")
         tactical_state["is_full_map"] = (current_mode == "MAP")
         tactical_state["is_map"] = (current_mode in ("DEPLOY_MAP", "MAP"))
@@ -87,6 +98,33 @@ class FoxholeCVDetector:
         # -------------------------------------------------------------
         # 3. MODE-SPECIFIC BOUNDING BOXES & SENSORS
         # -------------------------------------------------------------
+        if current_mode == "SPECTATING":
+            detected_boxes.append({
+                "box": [700, 20, 1220, 120],
+                "label": "SPECTATOR CAM // OBSERVING ALLY",
+                "color": (255, 100, 100),
+                "tag_pos": "bottom"
+            })
+            detected_boxes.append({
+                "box": self.roi_compass,
+                "label": "COMPASS & AZIMUTH",
+                "color": (255, 200, 0),
+                "tag_pos": "bottom"
+            })
+            detected_boxes.append({
+                "box": self.roi_squads,
+                "label": "REGIONAL SQUADS",
+                "color": (255, 100, 255),
+                "tag_pos": "top"
+            })
+            detected_boxes.append({
+                "box": self.roi_chat,
+                "label": "COMMS & CHAT LOG",
+                "color": (0, 220, 255),
+                "tag_pos": "top"
+            })
+            return detected_boxes, tactical_state
+
         if current_mode == "DEPLOY_MAP":
             detected_boxes.append({
                 "box": [15, 75, 360, 850],

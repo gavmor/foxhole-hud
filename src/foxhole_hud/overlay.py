@@ -64,6 +64,9 @@ class StrategicOverlayHUD(QWidget):
         elif mode == "VEHICLE":
             mode_col = QColor(255, 150, 0)
             mode_text = "VEHICLE"
+        elif mode == "SPECTATING":
+            mode_col = QColor(255, 100, 100)
+            mode_text = "SPECTATING"
         else:
             mode_col = QColor(0, 255, 180)
             mode_text = "PEDESTRIAN"
