@@ -1,0 +1,58 @@
+{
+  "active": true,
+  "title": "WARDEN TACTICAL ASSISTANT // MAP SYNCED (10:57:24)",
+  "strategic_orders": {
+    "title": "CALLAHAN HIGH COMMAND // STRATEGIC DIRECTIVES",
+    "mission": "OPERATION COLD RUN: SALT MARCH RESUPPLY",
+    "directives": [
+      {
+        "status": "DONE",
+        "text": "Set spawn & equip Radio + Loughcaster"
+      },
+      {
+        "status": "DONE",
+        "text": "Build Radar Watchtower on Brine Glen border"
+      },
+      {
+        "status": "IN_PROGRESS",
+        "text": "Cross border to Marban Hollow Logi Hub / Factory"
+      },
+      {
+        "status": "PENDING",
+        "text": "Haul Manifest: 3x Bandages, 2x FAK, 4x Mammon, 2x Radio"
+      },
+      {
+        "status": "PENDING",
+        "text": "Deliver to Salt March & lock down SW River Bridge"
+      }
+    ]
+  },
+  "alerts": [
+    {
+      "text": "DESTINATION: MARBAN HOLLOW FACTORY (IN QUEUE)",
+      "color": [
+        0,
+        220,
+        255
+      ]
+    },
+    {
+      "text": "HEALTH STATUS: NOMINAL \u2014 MAINTAIN DISTANCE",
+      "color": [
+        100,
+        255,
+        120
+      ]
+    },
+    {
+      "text": "STOCKPILE DETECTED: CHECK PUBLIC CRATES FIRST",
+      "color": [
+        255,
+        200,
+        0
+      ]
+    }
+  ],
+  "boxes": [],
+  "crosshairs": []
+}
