@@ -1,0 +1,26 @@
+[project]
+name = "foxhole-tactical-hud"
+version = "0.1.0"
+description = "Out-of-band computer vision HUD and goal-pursuit control loop for Foxhole"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pyqt6>=6.6.0",
+    "mss>=10.0.0",
+    "opencv-python>=4.9.0",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
+    "pydantic>=2.0.0",
+    "pytest>=8.0.0",
+    "foxhole @ file:///home/user/Documents/foxhole"
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/foxhole_hud"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
