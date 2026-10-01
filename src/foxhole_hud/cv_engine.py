@@ -94,16 +94,38 @@ class FoxholeCVDetector:
         else:
             current_mode = "MAP"
 
+        # Stance detection
+        if current_mode == "PEDESTRIAN":
+            stance_crop = bgr[16:124, 16:155]
+            gray_st = cv2.cvtColor(stance_crop, cv2.COLOR_BGR2GRAY)
+            mask_st = gray_st > 180
+            pts_st = np.argwhere(mask_st)
+            if len(pts_st) > 0:
+                h_st = np.max(pts_st[:, 0]) - np.min(pts_st[:, 0])
+                if h_st > 65:
+                    stance = "STAND"
+                elif h_st > 35:
+                    stance = "CROUCH"
+                else:
+                    stance = "PRONE"
+            else:
+                stance = "STAND"
+        elif current_mode == "VEHICLE":
+            stance = "MOUNTED"
+        else:
+            stance = "N/A"
+
         tactical_state["mode"] = current_mode
         tactical_state["is_spectating"] = (current_mode == "SPECTATING")
         tactical_state["is_deploy_map"] = (current_mode == "DEPLOY_MAP")
         tactical_state["is_full_map"] = (current_mode == "MAP")
         tactical_state["is_map"] = (current_mode in ("DEPLOY_MAP", "MAP"))
         tactical_state["in_vehicle"] = (current_mode == "VEHICLE")
-        tactical_state["has_minimap"] = has_minimap
+        tactical_state["has_minimap"] = (current_mode in ("PEDESTRIAN", "VEHICLE")) and has_minimap
         tactical_state["has_shield"] = has_shield
         tactical_state["white_stamina"] = white_stamina
         tactical_state["stamina_pct"] = min(100, int((white_stamina / 1200.0) * 100)) if white_stamina > 100 else 0
+        tactical_state["stance"] = stance
 
         # -------------------------------------------------------------
         # 2. BLEEDING CHECK (Pedestrian / Vehicle)

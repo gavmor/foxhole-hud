@@ -10,20 +10,85 @@ from foxhole_hud.bdi_engine import BDIGoalArbiter, Beliefs, GoalHierarchy
 from foxhole_hud.mcp_consultant import FoxholeMCPConsultant
 from foxhole_hud.cv_engine import FoxholeCVDetector
 
+from foxhole_hud.telemetry_aggregator import PlayerTelemetryAggregator
+
 def test_metadata_store_lifecycle():
     with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
         store = MetadataStore(tmp.name)
         store.record_frame(4.5, 1.1, {"in_vehicle": True, "has_banner": True, "subregion_text": "Fort Viper"}, (500, 300))
         store.record_mcp("get_production_cost", {"name": "Bandages"}, "Cost: 80 Bmats", 15.2)
-        store.record_goal_revision("Test Trigger", "Goal A", "Strategic B", "Tactical C")
+        store.record_transition("PEDESTRIAN", "VEHICLE", 45.2)
         
         metrics = store.get_recent_metrics()
         assert metrics["total_frames_recorded"] == 1
         assert metrics["total_mcp_consultations"] == 1
-        assert metrics["total_goal_revisions"] == 1
+        assert metrics["total_mode_transitions"] == 1
         assert metrics["avg_capture_ms"] == 4.5
         assert metrics["avg_cv_ms"] == 1.1
         store.close()
+
+def test_player_telemetry_aggregator():
+    agg = PlayerTelemetryAggregator()
+    
+    # 1. Initial Pedestrian update
+    summary = agg.update({
+        "mode": "PEDESTRIAN",
+        "stamina_pct": 100,
+        "stance": "STAND",
+        "is_bleeding": False,
+        "has_minimap": True,
+        "player_marker": (1000, 500)
+    }, cap_ms=4.5, cv_ms=1.2)
+    
+    assert summary["current_mode"] == "PEDESTRIAN"
+    assert summary["vitals"]["health"] == "STABLE"
+    assert summary["vitals"]["stamina_pct"] == 100
+    assert summary["vitals"]["stance"] == "STAND"
+    assert summary["navigation"]["has_minimap"] is True
+    assert summary["navigation"]["gps_coord"] == (1000, 500)
+    assert summary["navigation"]["cumulative_dist_px"] == 0.0
+
+    # 2. Movement & Stamina Drain
+    for i in range(1, 10):
+        summary = agg.update({
+            "mode": "PEDESTRIAN",
+            "stamina_pct": 100 - (i * 5),
+            "stance": "STAND",
+            "is_bleeding": False,
+            "has_minimap": True,
+            "player_marker": (1000 + i * 10, 500)
+        }, cap_ms=4.8, cv_ms=1.0)
+    
+    assert summary["vitals"]["stamina_trend"] == "DRAINING"
+    assert summary["vitals"]["stamina_pct"] == 55
+    assert summary["navigation"]["cumulative_dist_px"] == pytest.approx(90.0, abs=1.0)
+
+    # 3. Mode transition to VEHICLE
+    summary = agg.update({
+        "mode": "VEHICLE",
+        "has_shield": True,
+        "stance": "MOUNTED",
+        "is_bleeding": False
+    }, cap_ms=4.6, cv_ms=1.1)
+    
+    assert summary["current_mode"] == "VEHICLE"
+    assert summary["vitals"]["has_shield"] is True
+    assert summary["vitals"]["stance"] == "MOUNTED"
+    assert summary["analytics"]["transition_count"] == 1
+    assert agg.transitions[0][1] == "PEDESTRIAN"
+    assert agg.transitions[0][2] == "VEHICLE"
+
+    # 4. Mode transition to MAP with GPS chevron
+    summary = agg.update({
+        "mode": "MAP",
+        "player_marker": (1234, 483)
+    }, cap_ms=4.7, cv_ms=1.3)
+    
+    assert summary["current_mode"] == "MAP"
+    assert summary["analytics"]["transition_count"] == 2
+    assert summary["navigation"]["gps_coord"] == (1234, 483)
+    assert summary["performance"]["total_pipeline_ms"] > 0
+    assert summary["performance"]["max_possible_fps"] > 50
 
 def test_bdi_goal_arbitration_hierarchy():
     arbiter = BDIGoalArbiter()

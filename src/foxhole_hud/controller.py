@@ -11,6 +11,7 @@ from foxhole_hud.metadata_store import MetadataStore
 from foxhole_hud.mcp_consultant import FoxholeMCPConsultant
 from foxhole_hud.bdi_engine import BDIGoalArbiter
 from foxhole_hud.cv_engine import FoxholeCVDetector
+from foxhole_hud.telemetry_aggregator import PlayerTelemetryAggregator
 
 GAME_REGION = {"top": 0, "left": 1920, "width": 1920, "height": 1080}
 
@@ -23,9 +24,9 @@ class StrategicControlLoop(threading.Thread):
     Integrates:
     - 20 FPS MSS XShm screen capture (< 5ms)
     - 1ms OpenCV Native HUD detection
-    - Persistent SQLite metadata logging (frames, latency, coordinates)
+    - High-frequency Player Status Telemetry Aggregator (Vitals, GPS, Session stats)
+    - Persistent SQLite metadata logging (frames, transitions, latency)
     - Foxhole MCP consultation (recipes, facilities, map facts)
-    - BDI / GDA goal arbitration (Goal > Strategic Priority > Tactical Priority)
     """
     def __init__(self, signals: ControllerSignals, db_path=None):
         super().__init__(daemon=True)
@@ -37,14 +38,17 @@ class StrategicControlLoop(threading.Thread):
         self.mcp = FoxholeMCPConsultant(self.metadata)
         self.bdi = BDIGoalArbiter(self.mcp, self.metadata)
         self.detector = FoxholeCVDetector()
+        self.aggregator = PlayerTelemetryAggregator()
         
         self.active_boxes: List[Dict[str, Any]] = []
         self.telemetry: Dict[str, Any] = {
             "capture_ms": 4.8,
             "cv_ms": 1.0,
+            "mode": "PEDESTRIAN",
             "is_thinking": False,
             "mcp_status": "IDLE",
-            "db_frames": 0
+            "db_frames": 0,
+            "summary": self.aggregator.get_summary()
         }
         self.mcp_loop = asyncio.new_event_loop()
         threading.Thread(target=self._run_async_mcp_loop, daemon=True).start()
@@ -56,6 +60,10 @@ class StrategicControlLoop(threading.Thread):
     def get_telemetry(self) -> Dict[str, Any]:
         with self.lock:
             return dict(self.telemetry)
+
+    def get_player_summary(self) -> Dict[str, Any]:
+        with self.lock:
+            return self.aggregator.get_summary()
 
     def get_boxes(self) -> List[Dict[str, Any]]:
         with self.lock:
@@ -117,26 +125,30 @@ class StrategicControlLoop(threading.Thread):
                 boxes, cv_state = self.detector.process_frame(frame)
                 cv_ms = (time.time() - t_cv0) * 1000
                 
-                # 3. Store frame telemetry in SQLite metadata store
+                # 3. Update Player Status Aggregator & log transitions
+                prev_mode = self.aggregator.current_mode
+                summary = self.aggregator.update(cv_state, cap_ms, cv_ms)
+                if prev_mode != self.aggregator.current_mode:
+                    _, f_mode, t_mode, dur = self.aggregator.transitions[-1]
+                    self.metadata.record_transition(f_mode, t_mode, dur)
+
+                # 4. Store frame telemetry in SQLite metadata store
                 player_pos = cv_state.get("player_marker")
                 self.metadata.record_frame(cap_ms, cv_ms, cv_state, player_pos)
                 
-                # 4. BDI Goal Arbitration & Discrepancy Evaluation
+                # 5. State updates under lock
                 with self.lock:
                     self.active_boxes = boxes
-                    discrepancy = self.bdi.update_beliefs_from_cv(cv_state)
-                    if discrepancy:
-                        self.telemetry["is_thinking"] = True
-                    else:
-                        self.telemetry["is_thinking"] = False
-                        
+                    self.bdi.update_beliefs_from_cv(cv_state)
                     self.telemetry["capture_ms"] = round(cap_ms, 1)
                     self.telemetry["cv_ms"] = round(cv_ms, 1)
                     self.telemetry["mode"] = cv_state.get("mode", "PEDESTRIAN")
                     metrics = self.metadata.get_recent_metrics()
                     self.telemetry["db_frames"] = metrics["total_frames_recorded"]
+                    self.telemetry["total_transitions"] = metrics.get("total_mode_transitions", 0)
+                    self.telemetry["summary"] = summary
                 
-                # 5. Notify Qt overlay of frame completion
+                # 6. Notify Qt overlay of frame completion
                 self.signals.frame_processed.emit()
                 
                 # Regulate to 20 FPS (50ms) to ensure zero game or compositor lag

@@ -151,7 +151,7 @@ class BDIGoalArbiter:
             new_hierarchy.tactical_priority != old.tactical_priority
         ):
             self.current_intentions = new_hierarchy
-            if self.metadata:
+            if self.metadata and hasattr(self.metadata, "record_goal_revision"):
                 self.metadata.record_goal_revision(
                     new_hierarchy.revision_trigger,
                     new_hierarchy.goal,
