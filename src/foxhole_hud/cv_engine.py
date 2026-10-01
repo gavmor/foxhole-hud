@@ -33,48 +33,64 @@ class FoxholeCVDetector:
         }
 
         # -------------------------------------------------------------
-        # 1. INSTANT 4-WAY MODE RECOGNITION (< 1ms)
+        # 1. INSTANT 5-WAY MODE RECOGNITION (< 1ms)
         # -------------------------------------------------------------
-        # A. Sprint Stamina Bar check at [124:136, 22:145]
-        # In Foxhole, when on foot as a pedestrian, the stamina bar is a solid white bar (~120x11 = >1000px).
-        # Neither Vehicle, nor Map, nor Deploy Map ever displays this sprint stamina bar!
-        stamina_row = bgr[124:136, 22:145]
-        white_stamina = int(np.sum((stamina_row[:, :, 0] > 180) & (stamina_row[:, :, 1] > 180) & (stamina_row[:, :, 2] > 180)))
+        # A. Map Parchment Canvas Check
+        # When tactical map ('M') or Deploy Map is open, Foxhole displays a large parchment canvas.
+        center_roi = bgr[200:800, 400:1500]
+        parchment_pct = float(np.mean((center_roi[:, :, 0] > 110) & (center_roi[:, :, 1] > 125) & (center_roi[:, :, 2] > 125)))
 
-        # B. Vehicle widgets (silhouette at [30:88, 30:90] or armor shield)
-        veh_crop = bgr[30:88, 30:90]
-        veh_white = int(np.sum((veh_crop[:, :, 0] > 180) & (veh_crop[:, :, 1] > 180) & (veh_crop[:, :, 2] > 180)))
-        shield_crop = bgr[768:836, 932:988]
-        white_shield = int(np.sum((shield_crop[:, :, 0] > 200) & (shield_crop[:, :, 1] > 200) & (shield_crop[:, :, 2] > 200)))
-        has_shield = (35 < white_shield < 250)
-
-        # C. Spectator mode check (banner at [20:120, 700:1220])
-        spec_crop = bgr[20:120, 700:1220]
-        gray_s = cv2.cvtColor(spec_crop, cv2.COLOR_BGR2GRAY)
-        mask_s = gray_s > 180
-        num_s, _, stats_s, _ = cv2.connectedComponentsWithStats(mask_s.astype(np.uint8))
-        spec_letters = [s for s in stats_s[1:] if 6 <= s[3] <= 30 and 4 <= s[2] <= 30]
-        is_spectating = (int(np.sum(mask_s)) > 600 and len(spec_letters) >= 10)
-
-        # D. Map & Deploy Map checks (only possible when stamina bar is absent)
+        # B. Deploy Map check (sidebar has dark panel and 'CONQUEST' header)
         conquest_crop = bgr[90:130, 20:180]
         gray_c = cv2.cvtColor(conquest_crop, cv2.COLOR_BGR2GRAY)
         mask_c = gray_c > 180
         num_c, _, stats_c, _ = cv2.connectedComponentsWithStats(mask_c.astype(np.uint8))
         letters_c = [s for s in stats_c[1:] if 7 <= s[3] <= 18 and 4 <= s[2] <= 18]
         sidebar_dark = float(np.mean(bgr[100:400, 20:340])) < 80
+        is_deploy = (len(letters_c) >= 6 and sidebar_dark and int(np.sum(mask_c)) < 1200)
 
-        # Hierarchical Assignment
-        if white_stamina > 500:
+        # C. Sprint Stamina Bar check at [124:136, 22:145] (Pedestrian)
+        stamina_row = bgr[124:136, 22:145]
+        white_stamina = int(np.sum((stamina_row[:, :, 0] > 200) & (stamina_row[:, :, 1] > 200) & (stamina_row[:, :, 2] > 200)))
+
+        # D. Vehicle widgets (silhouette at [30:88, 30:90] or armor shield)
+        veh_crop = bgr[30:88, 30:90]
+        veh_white = int(np.sum((veh_crop[:, :, 0] > 180) & (veh_crop[:, :, 1] > 180) & (veh_crop[:, :, 2] > 180)))
+        shield_crop = bgr[768:836, 932:988]
+        white_shield = int(np.sum((shield_crop[:, :, 0] > 200) & (shield_crop[:, :, 1] > 200) & (shield_crop[:, :, 2] > 200)))
+        has_shield = (35 < white_shield < 250)
+
+        # E. Spectator mode check (banner at [20:120, 700:1220])
+        # In spectator cam: banner text is white on a dark background (dark_ratio > 0.55),
+        # with bounded glyph white pixels (500..5000), not parchment background (>20,000).
+        spec_crop = bgr[20:120, 700:1220]
+        gray_s = cv2.cvtColor(spec_crop, cv2.COLOR_BGR2GRAY)
+        mask_s = gray_s > 180
+        num_s, _, stats_s, _ = cv2.connectedComponentsWithStats(mask_s.astype(np.uint8))
+        spec_letters = [s for s in stats_s[1:] if 6 <= s[3] <= 30 and 4 <= s[2] <= 30]
+        dark_ratio = float(np.mean(gray_s < 100))
+        spec_white = int(np.sum(mask_s))
+        is_spectating = (dark_ratio > 0.55 and 500 <= spec_white <= 5000 and len(spec_letters) >= 10 and parchment_pct < 0.20)
+
+        # Hierarchical Assignment:
+        if is_deploy:
+            current_mode = "DEPLOY_MAP"
+        elif parchment_pct > 0.35:
+            current_mode = "MAP"
+        elif white_stamina > 500:
             current_mode = "PEDESTRIAN"
         elif veh_white > 400 or has_shield:
             current_mode = "VEHICLE"
         elif is_spectating:
             current_mode = "SPECTATING"
-        elif len(letters_c) >= 5 and sidebar_dark:
-            current_mode = "DEPLOY_MAP"
         else:
-            current_mode = "MAP"
+            # Fallback for pedestrian when stamina is exhausted or map view
+            minimap_crop = bgr[756:1079, 0:324]
+            m_mean = np.mean(minimap_crop, axis=(0, 1))
+            if 100 < m_mean[0] < 175 and 100 < m_mean[1] < 175 and 90 < m_mean[2] < 175:
+                current_mode = "PEDESTRIAN"
+            else:
+                current_mode = "MAP"
 
         tactical_state["mode"] = current_mode
         tactical_state["is_spectating"] = (current_mode == "SPECTATING")

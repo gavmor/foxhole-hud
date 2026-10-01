@@ -91,8 +91,8 @@ def test_five_mode_instant_recognition():
 
     # 1. SPECTATING test (Spectator banner with "SPECTATING: PLAYER_NAME")
     spec_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
-    for i, x in enumerate(range(740, 1100, 20)):
-        spec_frame[40:60, x:x+12, :3] = 255  # ~18 letters
+    for i, x in enumerate(range(760, 1060, 20)):
+        spec_frame[45:58, x:x+8, :3] = 255  # 15 letters of 13x8 = 1560 px
     boxes_s, state_s = detector.process_frame(spec_frame)
     assert state_s["mode"] == "SPECTATING"
     assert any("SPECTATOR CAM" in b["label"] for b in boxes_s)
@@ -102,9 +102,8 @@ def test_five_mode_instant_recognition():
 
     # 2. DEPLOY_MAP test (Conquest letters in left panel)
     deploy_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
-    # Simulate 8 letters of CONQUEST at y=100..112, x=30..150
-    for i, x in enumerate(range(30, 140, 14)):
-        deploy_frame[100:112, x:x+8, :3] = 255
+    for i, x in enumerate(range(30, 130, 12)):
+        deploy_frame[102:114, x:x+6, :3] = 255
     boxes_d, state_d = detector.process_frame(deploy_frame)
     assert state_d["mode"] == "DEPLOY_MAP"
     assert any("DEPLOYMENT DIRECTORY" in b["label"] for b in boxes_d)
