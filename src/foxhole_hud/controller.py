@@ -116,6 +116,7 @@ class StrategicControlLoop(threading.Thread):
                         
                     self.telemetry["capture_ms"] = round(cap_ms, 1)
                     self.telemetry["cv_ms"] = round(cv_ms, 1)
+                    self.telemetry["mode"] = cv_state.get("mode", "PEDESTRIAN")
                     metrics = self.metadata.get_recent_metrics()
                     self.telemetry["db_frames"] = metrics["total_frames_recorded"]
                 

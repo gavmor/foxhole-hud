@@ -19,23 +19,111 @@ class FoxholeCVDetector:
         
         detected_boxes = []
         tactical_state = {
-            "is_full_map": False, "is_map": False,
+            "mode": "PEDESTRIAN",
+            "is_deploy_map": False,
+            "is_full_map": False,
+            "is_map": False,
             "has_minimap": False,
             "in_vehicle": False,
             "vehicle_type": "",
             "is_bleeding": False,
             "at_industrial_hub": False,
+            "subregion": "Maiden's Veil (Industrial Sector)",
             "player_marker": None
         }
-        
-        # 1. Full Map Check ('M' key)
-        center_crop = bgr[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4]
-        mean_lum = float(np.mean(center_crop))
-        fist_crop = bgr[20:80, 20:80]
-        white_pts = int(np.sum((fist_crop[:, :, 0] > 200) & (fist_crop[:, :, 1] > 200) & (fist_crop[:, :, 2] > 200)))
-        
-        if white_pts < 100 and mean_lum > 85:
-            tactical_state["is_full_map"] = True
+
+        # -------------------------------------------------------------
+        # 1. INSTANT 4-WAY MODE RECOGNITION (< 1ms)
+        # -------------------------------------------------------------
+        # A. Check DEPLOY_MAP: Distinctive 'CONQUEST' header in left panel
+        conquest_crop = bgr[90:130, 20:180]
+        gray_c = cv2.cvtColor(conquest_crop, cv2.COLOR_BGR2GRAY)
+        mask_c = gray_c > 180
+        num_c, _, stats_c, _ = cv2.connectedComponentsWithStats(mask_c.astype(np.uint8))
+        letters_c = [s for s in stats_c[1:] if 7 <= s[3] <= 18 and 4 <= s[2] <= 18]
+        is_deploy_map = (len(letters_c) >= 5)
+
+        # B. Check MAP ('M' key tactical map):
+        # Center is full map parchment, but top-left in-game stance/vehicle is absent
+        center_crop = bgr[250:800, 450:1450]
+        center_lum = float(np.mean(center_crop))
+        tl_crop = bgr[20:80, 20:80]
+        tl_lum = float(np.mean(tl_crop))
+        tl_white = int(np.sum((tl_crop[:, :, 0] > 180) & (tl_crop[:, :, 1] > 180) & (tl_crop[:, :, 2] > 180)))
+        is_tactical_map = (not is_deploy_map) and (center_lum > 85 and tl_lum < 50 and tl_white < 50)
+
+        # C. In-Game: VEHICLE vs PEDESTRIAN
+        stamina_row = bgr[124:136, 22:145]
+        white_stamina = int(np.sum((stamina_row[:, :, 0] > 180) & (stamina_row[:, :, 1] > 180) & (stamina_row[:, :, 2] > 180)))
+        has_stamina = white_stamina > 60
+
+        veh_crop = bgr[20:110, 20:120]
+        veh_white = int(np.sum((veh_crop[:, :, 0] > 180) & (veh_crop[:, :, 1] > 180) & (veh_crop[:, :, 2] > 180)))
+
+        seat_row = bgr[95:110, 20:110]
+        seat_mask = (seat_row[:, :, 0] > 180) & (seat_row[:, :, 1] > 180) & (seat_row[:, :, 2] > 180)
+        num_seats, _, stats_seats, _ = cv2.connectedComponentsWithStats(seat_mask.astype(np.uint8))
+        seat_dots = [s for s in stats_seats[1:] if 4 <= s[3] <= 14 and 4 <= s[2] <= 14]
+
+        shield_crop = bgr[768:836, 932:988]
+        shield_white = int(np.sum((shield_crop[:, :, 0] > 200) & (shield_crop[:, :, 1] > 200) & (shield_crop[:, :, 2] > 200)))
+        has_shield = (35 < shield_white < 250)
+
+        is_vehicle = (not is_deploy_map and not is_tactical_map) and (len(seat_dots) >= 1 or has_shield or (veh_white > 300 and not has_stamina))
+
+        # Assign Mode
+        if is_deploy_map:
+            current_mode = "DEPLOY_MAP"
+        elif is_tactical_map:
+            current_mode = "MAP"
+        elif is_vehicle:
+            current_mode = "VEHICLE"
+        else:
+            current_mode = "PEDESTRIAN"
+
+        tactical_state["mode"] = current_mode
+        tactical_state["is_deploy_map"] = (current_mode == "DEPLOY_MAP")
+        tactical_state["is_full_map"] = (current_mode == "MAP")
+        tactical_state["is_map"] = (current_mode in ("DEPLOY_MAP", "MAP"))
+        tactical_state["in_vehicle"] = (current_mode == "VEHICLE")
+
+        # -------------------------------------------------------------
+        # 2. BLEEDING CHECK (Pedestrian / Vehicle)
+        # -------------------------------------------------------------
+        if current_mode in ("PEDESTRIAN", "VEHICLE"):
+            corners = np.concatenate([
+                bgr[20:60, 20:60], bgr[20:60, w-60:w-20],
+                bgr[h-60:h-20, 20:60], bgr[h-60:h-20, w-60:w-20]
+            ])
+            mean_b, mean_g, mean_r = np.mean(corners, axis=(0, 1))
+            if mean_r > 70 and mean_r > (mean_b + mean_g) * 0.7:
+                tactical_state["is_bleeding"] = True
+
+        # -------------------------------------------------------------
+        # 3. MODE-SPECIFIC BOUNDING BOXES & SENSORS
+        # -------------------------------------------------------------
+        if current_mode == "DEPLOY_MAP":
+            detected_boxes.append({
+                "box": [15, 75, 360, 850],
+                "label": "DEPLOYMENT DIRECTORY // CONQUEST & CASUALTIES",
+                "color": (255, 180, 0),
+                "tag_pos": "top"
+            })
+            detected_boxes.append({
+                "box": [380, 80, 1880, 960],
+                "label": "WORLD DEPLOYMENT MAP // SELECT SPAWN SECTOR",
+                "color": (0, 200, 255),
+                "tag_pos": "top"
+            })
+            return detected_boxes, tactical_state
+
+        if current_mode == "MAP":
+            detected_boxes.append({
+                "box": [200, 80, 1720, 980],
+                "label": "REGIONAL TACTICAL MAP ('M' RECON)",
+                "color": (0, 220, 255),
+                "tag_pos": "top"
+            })
             # Locate player chevron on full map
             mask_player = (bgr[:, :, 2] > 200) & (bgr[:, :, 1] > 90) & (bgr[:, :, 1] < 170) & (bgr[:, :, 0] < 80)
             pts = np.argwhere(mask_player)
@@ -44,30 +132,21 @@ class FoxholeCVDetector:
                 tactical_state["player_marker"] = (int(px), int(py))
                 detected_boxes.append({
                     "box": [int(px) - 24, int(py) - 24, int(px) + 24, int(py) + 24],
-                    "label": "PLAYER POSITION (GPS CHEVRON)",
+                    "label": "GPS CHEVRON // CURRENT POSITION",
                     "color": (255, 140, 0),
                     "tag_pos": "top"
                 })
             return detected_boxes, tactical_state
 
-        # 2. Bleed / Vignette Check
-        corners = np.concatenate([
-            bgr[20:60, 20:60], bgr[20:60, w-60:w-20],
-            bgr[h-60:h-20, 20:60], bgr[h-60:h-20, w-60:w-20]
-        ])
-        mean_b, mean_g, mean_r = np.mean(corners, axis=(0, 1))
-        if mean_r > 70 and mean_r > (mean_b + mean_g) * 0.7:
-            tactical_state["is_bleeding"] = True
-
-        # 3. Minimap Detection (Bottom-Left Corner: 324x323 at [0, 756, 324, 1079])
+        # IN-GAME MODES: VEHICLE or PEDESTRIAN
+        # A. Minimap Detection (Bottom-Left Corner: 324x323 at [0, 756, 324, 1079])
         minimap_crop = bgr[756:1079, 0:324]
         m_mean = np.mean(minimap_crop, axis=(0, 1))
-        # Characteristic map paper: R ~= G ~= B and luminance > 110
-        if 110 < m_mean[0] < 175 and 110 < m_mean[1] < 175 and 100 < m_mean[2] < 175:
+        if 100 < m_mean[0] < 175 and 100 < m_mean[1] < 175 and 90 < m_mean[2] < 175:
             tactical_state["has_minimap"] = True
             tactical_state["at_industrial_hub"] = True
             
-            # Detect player chevron on minimap to establish immediate surroundings
+            # Detect player chevron on minimap
             hsv_mini = cv2.cvtColor(minimap_crop, cv2.COLOR_BGR2HSV)
             mask1 = cv2.inRange(hsv_mini, (10, 140, 170), (25, 255, 255))
             mask2 = (minimap_crop[:, :, 2] > 200) & (minimap_crop[:, :, 1] > 90) & (minimap_crop[:, :, 1] < 170) & (minimap_crop[:, :, 0] < 90)
@@ -87,7 +166,6 @@ class FoxholeCVDetector:
                     subregion = "Maiden's Veil Factory / Logistics Depot (South)"
             
             tactical_state["subregion"] = subregion
-            
             detected_boxes.append({
                 "box": self.roi_minimap,
                 "label": f"MINIMAP // {subregion.upper()}",
@@ -95,30 +173,24 @@ class FoxholeCVDetector:
                 "tag_pos": "top"
             })
 
-        # 4. Top-Left Stance / Vehicle Role
-        # Check if in vehicle ("Dunne Transport" or "Passenger" text at y: 80..100)
-        text_row = bgr[82:98, 10:140]
-        white_text = np.sum((text_row[:, :, 0] > 180) & (text_row[:, :, 1] > 180) & (text_row[:, :, 2] > 180))
-        in_veh = white_text > 80
-        
-        if in_veh:
-            tactical_state["in_vehicle"] = True
+        # B. Top-Left Stance or Vehicle Widget
+        if current_mode == "VEHICLE":
             tactical_state["vehicle_type"] = "Dunne Transport"
-            box_stamina = [16, 16, 190, 110]
-            label_stamina = "VEHICLE: DUNNE TRANSPORT"
+            detected_boxes.append({
+                "box": [16, 16, 190, 115],
+                "label": "VEHICLE STATUS // DUNNE LOGISTICS TRUCK",
+                "color": (0, 255, 180),
+                "tag_pos": "bottom"
+            })
         else:
-            # Calibrated to cover stance icon (y:20..85) and stamina meter (y:124..136)
-            box_stamina = [16, 16, 155, 142]
-            label_stamina = "STANCE & STAMINA METER"
-            
-        detected_boxes.append({
-            "box": box_stamina,
-            "label": label_stamina,
-            "color": (0, 255, 200),
-            "tag_pos": "bottom"
-        })
+            detected_boxes.append({
+                "box": [16, 16, 155, 142],
+                "label": "STANCE & STAMINA METER",
+                "color": (0, 255, 200),
+                "tag_pos": "bottom"
+            })
 
-        # 5. Compass (Top-Right)
+        # C. Compass (Top-Right)
         detected_boxes.append({
             "box": self.roi_compass,
             "label": "COMPASS & AZIMUTH",
@@ -126,7 +198,7 @@ class FoxholeCVDetector:
             "tag_pos": "bottom"
         })
 
-        # 6. Regional Squads Panel (Mid-Right, ends above chat)
+        # D. Regional Squads Panel (Mid-Right)
         detected_boxes.append({
             "box": self.roi_squads,
             "label": "REGIONAL SQUADS",
@@ -134,7 +206,7 @@ class FoxholeCVDetector:
             "tag_pos": "top"
         })
 
-        # 7. Communications & Chat Log (Bottom-Right, exactly fits tabs + log)
+        # E. Communications & Chat Log (Bottom-Right)
         detected_boxes.append({
             "box": self.roi_chat,
             "label": "COMMS & CHAT LOG",
@@ -142,12 +214,8 @@ class FoxholeCVDetector:
             "tag_pos": "top"
         })
 
-        # 8. Vehicle Shield Detection (Strict Shape & Color, NO Cobblestone false positives)
-        shield_crop = bgr[768:836, 932:988]
-        # Real shield has pure white/light grey contour on dark interior
-        white_shield_pts = np.sum((shield_crop[:, :, 0] > 210) & (shield_crop[:, :, 1] > 210) & (shield_crop[:, :, 2] > 210))
-        # Shield border has roughly 60-200 pure white pixels, cobblestone has scattered mid-tones
-        if 40 < white_shield_pts < 250:
+        # F. Vehicle Armor Shield (if vehicle with armor)
+        if has_shield:
             detected_boxes.append({
                 "box": [932, 768, 988, 836],
                 "label": "VEHICLE ARMOR STATUS",

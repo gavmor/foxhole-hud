@@ -6,7 +6,8 @@ import time
 class Beliefs:
     region: str = "Marban Hollow"
     subregion: str = "Maiden's Veil (Industrial Sector)"
-    in_vehicle: bool = True
+    mode: str = "PEDESTRIAN"
+    in_vehicle: bool = False
     vehicle_role: str = "Driver"
     is_bleeding: bool = False
     is_full_map: bool = False
@@ -29,6 +30,7 @@ class BDIGoalArbiter:
     Belief-Desire-Intention (BDI) and Goal-Driven Autonomy (GDA) Engine.
     Grounded in immediate surroundings: Maiden's Veil industrial hub,
     seaport fuel deficit, and Salt March resupply mandate.
+    Instant arbitration across: DEPLOY_MAP, MAP, VEHICLE, PEDESTRIAN.
     """
     def __init__(self, mcp_consultant=None, metadata_store=None):
         self.beliefs = Beliefs()
@@ -43,9 +45,10 @@ class BDIGoalArbiter:
 
     def update_beliefs_from_cv(self, cv_state: Dict[str, Any], banner_text: str = ""):
         b = self.beliefs
-        b.in_vehicle = cv_state.get("in_vehicle", False)
+        b.mode = cv_state.get("mode", "PEDESTRIAN")
+        b.in_vehicle = cv_state.get("in_vehicle", (b.mode == "VEHICLE"))
         b.is_bleeding = cv_state.get("is_bleeding", False)
-        b.is_full_map = cv_state.get("is_full_map", False)
+        b.is_full_map = cv_state.get("is_full_map", (b.mode == "MAP"))
         b.has_minimap = cv_state.get("has_minimap", False)
         b.at_industrial_hub = cv_state.get("at_industrial_hub", False) or b.has_minimap
         if "subregion" in cv_state:
@@ -59,7 +62,7 @@ class BDIGoalArbiter:
         old = self.current_intentions
         new_hierarchy = None
 
-        # Priority 0: Immediate Survival
+        # Priority 0: Immediate Survival (Bleeding)
         if b.is_bleeding:
             new_hierarchy = GoalHierarchy(
                 goal="Immediate Survival: Stop Hemorrhage",
@@ -68,60 +71,77 @@ class BDIGoalArbiter:
                 revision_trigger="Bleed Discrepancy"
             )
 
-        # Priority 1: Full Map Reconnaissance ('M')
-        elif b.is_full_map:
+        # Mode 1: DEPLOY_MAP (Conquest / World Respawn Screen)
+        elif b.mode == "DEPLOY_MAP":
             new_hierarchy = GoalHierarchy(
-                goal="Operational Reconnaissance: Marban Hollow & Deadlands Frontlines",
-                strategic_priority="Scout Factory Queue Times and Seaport Stockpiles",
-                tactical_priority="Map Open: Check Maiden's Veil factory load and route back to Salt March",
-                revision_trigger="Full Map Discrepancy"
+                goal="Operation Cold Run: Theater Deployment Selection",
+                strategic_priority="Select Deployment Base: Marban Hollow (Maiden's Veil Keep / Seaport)",
+                tactical_priority="Deploy Map Open: Click Marban Hollow -> spawn at Maiden's Veil Town Base to resume Seaport fuel supply",
+                revision_trigger="Switched to DEPLOY_MAP"
             )
 
-        # Priority 2: At Maiden's Veil Subregion (Immediate Surroundings)
-        elif b.at_industrial_hub:
+        # Mode 2: MAP ('M' key tactical map)
+        elif b.mode == "MAP" or b.is_full_map:
+            new_hierarchy = GoalHierarchy(
+                goal="Operational Reconnaissance: Marban Hollow & Deadlands Frontlines",
+                strategic_priority="Survey Hex Logistics Routes: Maiden's Veil -> Spitrocks -> Salt March",
+                tactical_priority="Map Recon Open: Check road watchtowers, enemy partisans, and factory queue times",
+                revision_trigger="Switched to MAP"
+            )
+
+        # Mode 3: VEHICLE (Mounted in truck/transport)
+        elif b.mode == "VEHICLE" or b.in_vehicle:
             if "Seaport" in b.subregion or "Docks" in b.subregion:
-                if b.in_vehicle:
-                    new_hierarchy = GoalHierarchy(
-                        goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
-                        strategic_priority="Resolve Seaport Fuel Crisis (0 Diesel in Seaport Pool)",
-                        tactical_priority="In Dunne at Seaport: Refuel truck -> submit 10x Diesel cans to Seaport pool",
-                        revision_trigger="At Seaport in Vehicle"
-                    )
-                else:
-                    new_hierarchy = GoalHierarchy(
-                        goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
-                        strategic_priority="Resolve Seaport Fuel Crisis (0 Diesel in Seaport Pool)",
-                        tactical_priority="On Foot at Seaport: Dunnes empty. Sprint to Refinery (East) -> pull 15x Diesel to fuel fleet",
-                        revision_trigger="At Seaport on Foot"
-                    )
-            elif "Refinery" in b.subregion or "Industrial" in b.subregion:
-                if b.in_vehicle:
-                    new_hierarchy = GoalHierarchy(
-                        goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
-                        strategic_priority="Resolve Seaport Fuel Crisis (Refinery Haul)",
-                        tactical_priority="At Refinery in Dunne: Fill vehicle tank -> load 15x Diesel cans to transport to Seaport",
-                        revision_trigger="At Refinery in Vehicle"
-                    )
-                else:
-                    new_hierarchy = GoalHierarchy(
-                        goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
-                        strategic_priority="Resolve Seaport Fuel Crisis (Refinery Haul)",
-                        tactical_priority="At Refinery on Foot: Pull 15x Diesel cans from public stockpile -> load into Dunne truck",
-                        revision_trigger="At Refinery on Foot"
-                    )
-            elif "Factory" in b.subregion:
                 new_hierarchy = GoalHierarchy(
                     goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
-                    strategic_priority="Manufacture Munitions & Medical Supplies for Salt March",
-                    tactical_priority="At Factory: Queue Small Arms (7.62mm) & Soldier Supplies crates for frontlines",
-                    revision_trigger="At Factory"
+                    strategic_priority="Resolve Seaport Fuel Crisis (0 Diesel in Seaport Pool)",
+                    tactical_priority="In Dunne at Seaport: Drive to Refinery (East) -> fill fuel tank & load 15x Diesel cans for Seaport",
+                    revision_trigger="Switched to VEHICLE at Seaport"
+                )
+            elif "Refinery" in b.subregion or "Industrial" in b.subregion:
+                new_hierarchy = GoalHierarchy(
+                    goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
+                    strategic_priority="Resolve Seaport Fuel Crisis (Refinery Haul)",
+                    tactical_priority="At Refinery in Dunne: Fill vehicle fuel tank -> load 15x Diesel cans to transport to Seaport",
+                    revision_trigger="Switched to VEHICLE at Refinery"
                 )
             else:
                 new_hierarchy = GoalHierarchy(
                     goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
                     strategic_priority="Resolve Seaport Fuel Crisis (0 Diesel in Seaport Pool)",
-                    tactical_priority=f"At {b.subregion}: Acquire Diesel fuel -> unbrick Seaport logistics Dunnes",
-                    revision_trigger="At Maiden's Veil Hub"
+                    tactical_priority="In Dunne Transport: Route along main road to delivery point -> watch for partisans",
+                    revision_trigger="Switched to VEHICLE"
+                )
+
+        # Mode 4: PEDESTRIAN (On foot)
+        else:
+            if "Seaport" in b.subregion or "Docks" in b.subregion:
+                new_hierarchy = GoalHierarchy(
+                    goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
+                    strategic_priority="Resolve Seaport Fuel Crisis (0 Diesel in Seaport Pool)",
+                    tactical_priority="On Foot at Seaport: Dunnes empty. Sprint to Refinery (East) -> pull 15x Diesel to fuel fleet",
+                    revision_trigger="Switched to PEDESTRIAN at Seaport"
+                )
+            elif "Refinery" in b.subregion or "Industrial" in b.subregion:
+                new_hierarchy = GoalHierarchy(
+                    goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
+                    strategic_priority="Resolve Seaport Fuel Crisis (Refinery Haul)",
+                    tactical_priority="At Refinery on Foot: Pull 15x Diesel cans from public stockpile -> load into Dunne truck",
+                    revision_trigger="Switched to PEDESTRIAN at Refinery"
+                )
+            elif "Factory" in b.subregion:
+                new_hierarchy = GoalHierarchy(
+                    goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
+                    strategic_priority="Manufacture Munitions & Medical Supplies for Salt March",
+                    tactical_priority="At Factory: Queue Small Arms (7.62mm) & Soldier Supplies crates for frontlines",
+                    revision_trigger="Switched to PEDESTRIAN at Factory"
+                )
+            else:
+                new_hierarchy = GoalHierarchy(
+                    goal="Operation Cold Run: Marban Hollow Logistics Relief (Salt March)",
+                    strategic_priority="Resolve Seaport Fuel Crisis (0 Diesel in Seaport Pool)",
+                    tactical_priority=f"On Foot at {b.subregion}: Acquire Diesel fuel -> unbrick Seaport logistics Dunnes",
+                    revision_trigger="Switched to PEDESTRIAN"
                 )
 
         # Commit revision

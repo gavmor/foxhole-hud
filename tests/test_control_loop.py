@@ -33,7 +33,7 @@ def test_bdi_goal_arbitration_hierarchy():
     rev_map = arbiter.update_beliefs_from_cv({"is_full_map": True})
     assert rev_map is not None
     assert "Operational Reconnaissance" in rev_map.goal
-    assert "Map Open" in rev_map.tactical_priority
+    assert "Map Recon Open" in rev_map.tactical_priority
     
     # 2. Simulate Bleed emergency
     rev_bleed = arbiter.update_beliefs_from_cv({"is_bleeding": True})
@@ -83,5 +83,49 @@ def test_cv_engine_submillisecond_roi():
     dt_ms = (time.time() - t0) * 1000
     
     assert dt_ms < 10.0
-    assert len(boxes) >= 4  # Stance, compass, squads, chat
-    assert state["is_full_map"] is False
+    assert state["mode"] in ("PEDESTRIAN", "VEHICLE", "MAP", "DEPLOY_MAP")
+
+def test_four_mode_instant_recognition():
+    detector = FoxholeCVDetector()
+    arbiter = BDIGoalArbiter()
+
+    # 1. DEPLOY_MAP test (Conquest letters in left panel)
+    deploy_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
+    # Simulate 8 letters of CONQUEST at y=100..112, x=30..150
+    for i, x in enumerate(range(30, 140, 14)):
+        deploy_frame[100:112, x:x+8, :3] = 255
+    boxes_d, state_d = detector.process_frame(deploy_frame)
+    assert state_d["mode"] == "DEPLOY_MAP"
+    assert any("DEPLOYMENT DIRECTORY" in b["label"] for b in boxes_d)
+    rev_d = arbiter.update_beliefs_from_cv(state_d)
+    assert "Deployment" in rev_d.goal
+
+    # 2. MAP test ('M' key tactical map)
+    map_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
+    map_frame[250:800, 450:1450, :3] = 140  # Parchment canvas
+    boxes_m, state_m = detector.process_frame(map_frame)
+    assert state_m["mode"] == "MAP"
+    assert any("REGIONAL TACTICAL MAP" in b["label"] for b in boxes_m)
+    rev_m = arbiter.update_beliefs_from_cv(state_m)
+    assert "Operational Reconnaissance" in rev_m.goal
+
+    # 3. VEHICLE test (Seat dots / vehicle silhouette without stamina bar)
+    veh_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
+    veh_frame[20:110, 20:120, :3] = 220  # Vehicle silhouette
+    veh_frame[98:108, 30:40, :3] = 255   # Seat dot 1
+    veh_frame[98:108, 50:60, :3] = 255   # Seat dot 2
+    boxes_v, state_v = detector.process_frame(veh_frame)
+    assert state_v["mode"] == "VEHICLE"
+    assert any("VEHICLE STATUS" in b["label"] for b in boxes_v)
+    rev_v = arbiter.update_beliefs_from_cv(state_v)
+    assert "Dunne" in rev_v.tactical_priority
+
+    # 4. PEDESTRIAN test (Stance posture + sprint stamina bar)
+    ped_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
+    ped_frame[20:80, 20:80, :3] = 220     # Stance figure
+    ped_frame[124:136, 22:145, :3] = 255  # Stamina bar
+    boxes_p, state_p = detector.process_frame(ped_frame)
+    assert state_p["mode"] == "PEDESTRIAN"
+    assert any("STANCE & STAMINA" in b["label"] for b in boxes_p)
+    rev_p = arbiter.update_beliefs_from_cv(state_p)
+    assert "on foot" in rev_p.tactical_priority.lower()

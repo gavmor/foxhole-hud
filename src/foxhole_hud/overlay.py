@@ -41,9 +41,9 @@ class StrategicOverlayHUD(QWidget):
         boxes = self.controller.get_boxes()
 
         # -------------------------------------------------------------
-        # 1. TOP TELEMETRY STATUS BAR (CAPTURED / THINKING / MCP)
+        # 1. TOP TELEMETRY STATUS BAR (MODE / CAPTURED / THINKING / MCP / DB)
         # -------------------------------------------------------------
-        bar_w = 640
+        bar_w = 800
         bar_h = 30
         bar_x = (1920 - bar_w) // 2
         bar_y = 12
@@ -53,43 +53,65 @@ class StrategicOverlayHUD(QWidget):
         painter.setBrush(QBrush(QColor(10, 15, 24, 230)))
         painter.drawRoundedRect(QRectF(bar_x, bar_y, bar_w, bar_h), 5, 5)
         
-        # A. Captured Badge
-        cap_ms = telemetry.get("capture_ms", 4.8)
+        # A. Operational Mode Badge
+        mode = telemetry.get("mode", "PEDESTRIAN")
+        if mode == "DEPLOY_MAP":
+            mode_col = QColor(255, 215, 0)
+            mode_text = "DEPLOY MAP"
+        elif mode == "MAP":
+            mode_col = QColor(0, 220, 255)
+            mode_text = "MAP ('M')"
+        elif mode == "VEHICLE":
+            mode_col = QColor(255, 150, 0)
+            mode_text = "VEHICLE"
+        else:
+            mode_col = QColor(0, 255, 180)
+            mode_text = "PEDESTRIAN"
+
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(0, 255, 120)))
+        painter.setBrush(QBrush(mode_col))
         painter.drawEllipse(QPointF(bar_x + 14, bar_y + 15), 4, 4)
         
         painter.setFont(self.font_mono)
-        painter.setPen(QColor(230, 245, 255))
-        painter.drawText(bar_x + 24, bar_y + 19, f"CAPTURED: {cap_ms:.1f}ms")
+        painter.setPen(mode_col)
+        painter.drawText(bar_x + 24, bar_y + 19, f"MODE: {mode_text}")
         
-        # B. Thinking Badge (BDI / GDA Engine)
+        # B. Captured Badge
+        cap_ms = telemetry.get("capture_ms", 4.8)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(0, 255, 120)))
+        painter.drawEllipse(QPointF(bar_x + 190, bar_y + 15), 4, 4)
+        
+        painter.setPen(QColor(230, 245, 255))
+        painter.drawText(bar_x + 200, bar_y + 19, f"CAP: {cap_ms:.1f}ms")
+        
+        # C. Thinking Badge (BDI / GDA Engine)
         is_thinking = telemetry.get("is_thinking", False)
         think_col = QColor(255, 190, 0) if is_thinking else QColor(80, 180, 255)
-        think_text = "THINKING (BDI)" if is_thinking else "EVALUATING"
+        think_text = "THINKING" if is_thinking else "EVALUATING"
         
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(think_col))
-        painter.drawEllipse(QPointF(bar_x + 180, bar_y + 15), 4, 4)
+        painter.drawEllipse(QPointF(bar_x + 340, bar_y + 15), 4, 4)
         
         painter.setPen(think_col)
-        painter.drawText(bar_x + 190, bar_y + 19, think_text)
+        painter.drawText(bar_x + 350, bar_y + 19, think_text)
         
-        # C. MCP Consultation Status
+        # D. MCP Consultation Status
         mcp_status = telemetry.get("mcp_status", "IDLE")
         mcp_col = QColor(0, 230, 255) if mcp_status == "CONSULTING" else QColor(140, 160, 190)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(mcp_col))
-        painter.drawEllipse(QPointF(bar_x + 330, bar_y + 15), 4, 4)
+        painter.drawEllipse(QPointF(bar_x + 480, bar_y + 15), 4, 4)
         
         painter.setPen(mcp_col)
-        painter.drawText(bar_x + 340, bar_y + 19, f"MCP: {mcp_status}")
+        painter.drawText(bar_x + 490, bar_y + 19, f"MCP: {mcp_status}")
         
-        # D. Metadata DB Count
+        # E. Metadata DB Count
         db_count = telemetry.get("db_frames", 0)
         painter.setFont(self.font_mono)
         painter.setPen(QColor(170, 190, 210))
-        painter.drawText(bar_x + 475, bar_y + 19, f"DB: {db_count} FRAMES")
+        painter.drawText(bar_x + 630, bar_y + 19, f"DB: {db_count} FRAMES")
 
         # -------------------------------------------------------------
         # 2. THREE-TIER GOAL HIERARCHY CARD (Top-Left: x=20, y=172)
@@ -106,13 +128,13 @@ class StrategicOverlayHUD(QWidget):
         
         # Top banner strip
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(40, 130, 230)))
+        painter.setBrush(QBrush(mode_col))
         painter.drawRoundedRect(QRectF(panel_x + 1, panel_y + 1, panel_w - 2, 4), 2, 2)
         
         # Header Title
         painter.setFont(self.font_title)
         painter.setPen(QColor(90, 180, 255))
-        painter.drawText(panel_x + 14, panel_y + 22, "STRATEGIC CONTROL LOOP // BDI GOAL HIERARCHY")
+        painter.drawText(panel_x + 14, panel_y + 22, f"STRATEGIC CONTROL LOOP // {mode}")
         
         painter.setPen(QPen(QColor(35, 75, 120, 180), 1))
         painter.drawLine(panel_x + 14, panel_y + 30, panel_x + panel_w - 14, panel_y + 30)
