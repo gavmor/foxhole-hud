@@ -27,40 +27,30 @@ def test_metadata_store_lifecycle():
 
 def test_bdi_goal_arbitration_hierarchy():
     arbiter = BDIGoalArbiter()
-    assert "Salt March" in arbiter.current_intentions.goal
+    assert "Active Conquest" in arbiter.current_intentions.goal
     
     # 1. Simulate Map Open transition
-    rev_map = arbiter.update_beliefs_from_cv({"is_full_map": True})
+    rev_map = arbiter.update_beliefs_from_cv({"is_full_map": True, "player_marker": (1234, 483)})
     assert rev_map is not None
-    assert "Operational Reconnaissance" in rev_map.goal
-    assert "Map Recon Open" in rev_map.tactical_priority
+    assert "Theater Reconnaissance" in rev_map.strategic_priority
+    assert "GPS Fix Locked" in rev_map.tactical_priority
     
     # 2. Simulate Bleed emergency
     rev_bleed = arbiter.update_beliefs_from_cv({"is_bleeding": True})
     assert rev_bleed is not None
-    assert "Immediate Survival" in rev_bleed.goal
-    assert "EMERGENCY" in rev_bleed.tactical_priority
+    assert "Hemorrhage" in rev_bleed.strategic_priority
+    assert "CRITICAL" in rev_bleed.tactical_priority
 
-    # 3. Simulate arrival at Seaport on foot (empty Dunnes)
-    rev_seaport = arbiter.update_beliefs_from_cv({
-        "at_industrial_hub": True,
-        "subregion": "Maiden's Veil Seaport / Docks (West)",
-        "in_vehicle": False
-    })
-    assert rev_seaport is not None
-    assert "Seaport" in rev_seaport.tactical_priority
-    assert "Sprint to Refinery" in rev_seaport.tactical_priority
-    assert "Fuel Crisis" in rev_seaport.strategic_priority
+    # 3. Simulate Vehicle transition
+    rev_veh = arbiter.update_beliefs_from_cv({"in_vehicle": True, "has_shield": True})
+    assert rev_veh is not None
+    assert "Armored Combat" in rev_veh.strategic_priority
 
-    # 4. Simulate arrival at industrial hub in vehicle
-    rev_hub = arbiter.update_beliefs_from_cv({
-        "at_industrial_hub": True,
-        "subregion": "Maiden's Veil (Industrial Sector)",
-        "in_vehicle": True
-    })
-    assert rev_hub is not None
-    assert "Refinery" in rev_hub.tactical_priority
-    assert "Fuel" in rev_hub.strategic_priority
+    # 4. Simulate Pedestrian transition
+    rev_ped = arbiter.update_beliefs_from_cv({"mode": "PEDESTRIAN", "stamina_pct": 100, "has_minimap": True})
+    assert rev_ped is not None
+    assert "Field Operations" in rev_ped.strategic_priority
+    assert "Sprint Ready" in rev_ped.tactical_priority
 
 def test_mcp_consultation():
     with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
@@ -101,28 +91,28 @@ def test_five_mode_instant_recognition():
     assert state_s["mode"] == "SPECTATING"
     assert any("SPECTATOR CAM" in b["label"] for b in boxes_s)
     rev_s = arbiter.update_beliefs_from_cv(state_s)
-    assert "Combat Observation" in rev_s.goal
+    assert "Casualty Observation" in rev_s.strategic_priority
     assert "Spectating Ally" in rev_s.tactical_priority
 
     # 2. DEPLOY_MAP test (Conquest letters in left panel with world map parchment)
     deploy_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
-    deploy_frame[250:800, 450:1450, :3] = 160  # World map parchment
+    deploy_frame[200:800, 400:1500, :3] = 160  # World map parchment
     for i, x in enumerate(range(30, 130, 12)):
         deploy_frame[102:114, x:x+6, :3] = 255  # CONQUEST header
     boxes_d, state_d = detector.process_frame(deploy_frame)
     assert state_d["mode"] == "DEPLOY_MAP"
     assert any("DEPLOYMENT DIRECTORY" in b["label"] for b in boxes_d)
     rev_d = arbiter.update_beliefs_from_cv(state_d)
-    assert "Deployment" in rev_d.goal
+    assert "Theater Reinforcement" in rev_d.strategic_priority
 
     # 3. MAP test ('M' key tactical map)
     map_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
-    map_frame[250:800, 450:1450, :3] = 140  # Parchment canvas
+    map_frame[250:800, 450:1450, :3] = 160  # Parchment canvas
     boxes_m, state_m = detector.process_frame(map_frame)
     assert state_m["mode"] == "MAP"
     assert any("REGIONAL TACTICAL MAP" in b["label"] for b in boxes_m)
     rev_m = arbiter.update_beliefs_from_cv(state_m)
-    assert "Operational Reconnaissance" in rev_m.goal
+    assert "Theater Reconnaissance" in rev_m.strategic_priority
 
     # 4. VEHICLE test (Seat dots / vehicle silhouette without stamina bar)
     veh_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
@@ -133,7 +123,7 @@ def test_five_mode_instant_recognition():
     assert state_v["mode"] == "VEHICLE"
     assert any("VEHICLE STATUS" in b["label"] for b in boxes_v)
     rev_v = arbiter.update_beliefs_from_cv(state_v)
-    assert "Dunne" in rev_v.tactical_priority
+    assert "Motorized Operations" in rev_v.strategic_priority
 
     # 5. PEDESTRIAN test (Stance posture + sprint stamina bar)
     ped_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
@@ -143,4 +133,4 @@ def test_five_mode_instant_recognition():
     assert state_p["mode"] == "PEDESTRIAN"
     assert any("STANCE & STAMINA" in b["label"] for b in boxes_p)
     rev_p = arbiter.update_beliefs_from_cv(state_p)
-    assert "on foot" in rev_p.tactical_priority.lower()
+    assert "Field Operations" in rev_p.strategic_priority

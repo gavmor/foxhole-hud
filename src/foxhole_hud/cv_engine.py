@@ -100,6 +100,10 @@ class FoxholeCVDetector:
         tactical_state["is_full_map"] = (current_mode == "MAP")
         tactical_state["is_map"] = (current_mode in ("DEPLOY_MAP", "MAP"))
         tactical_state["in_vehicle"] = (current_mode == "VEHICLE")
+        tactical_state["has_minimap"] = has_minimap
+        tactical_state["has_shield"] = has_shield
+        tactical_state["white_stamina"] = white_stamina
+        tactical_state["stamina_pct"] = min(100, int((white_stamina / 1200.0) * 100)) if white_stamina > 100 else 0
 
         # -------------------------------------------------------------
         # 2. BLEEDING CHECK (Pedestrian / Vehicle)

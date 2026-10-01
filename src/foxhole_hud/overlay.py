@@ -121,8 +121,8 @@ class StrategicOverlayHUD(QWidget):
         # -------------------------------------------------------------
         panel_x = 20
         panel_y = 172
-        panel_w = 540
-        panel_h = 178
+        panel_w = 580
+        panel_h = 196
         
         # Panel Shell
         painter.setPen(QPen(QColor(40, 130, 230, 220), 1.5))
@@ -137,37 +137,37 @@ class StrategicOverlayHUD(QWidget):
         # Header Title
         painter.setFont(self.font_title)
         painter.setPen(QColor(90, 180, 255))
-        painter.drawText(panel_x + 14, panel_y + 22, f"STRATEGIC CONTROL LOOP // {mode}")
+        painter.drawText(panel_x + 14, panel_y + 24, f"STRATEGIC CONTROL LOOP // {mode}")
         
         painter.setPen(QPen(QColor(35, 75, 120, 180), 1))
-        painter.drawLine(panel_x + 14, panel_y + 30, panel_x + panel_w - 14, panel_y + 30)
+        painter.drawLine(panel_x + 14, panel_y + 32, panel_x + panel_w - 14, panel_y + 32)
         
         # Tier 1: GOAL (Macro / Campaign)
         painter.setFont(QFont("DejaVu Sans", 7, QFont.Weight.Bold))
         painter.setPen(QColor(140, 180, 220))
-        painter.drawText(panel_x + 14, panel_y + 44, "[1] CAMPAIGN GOAL (MACRO):")
+        painter.drawText(panel_x + 14, panel_y + 46, "[1] CAMPAIGN GOAL (MACRO // LIVE CONQUEST):")
         
         painter.setFont(self.font_body)
         painter.setPen(QColor(245, 250, 255))
-        painter.drawText(QRectF(panel_x + 14, panel_y + 48, panel_w - 28, 20), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), intentions.goal)
+        painter.drawText(QRectF(panel_x + 14, panel_y + 50, panel_w - 28, 20), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), intentions.goal)
         
         # Tier 2: STRATEGIC PRIORITY (Theater / Hex)
         painter.setFont(QFont("DejaVu Sans", 7, QFont.Weight.Bold))
         painter.setPen(QColor(255, 190, 40))
-        painter.drawText(panel_x + 14, panel_y + 78, "[2] STRATEGIC PRIORITY (HEX):")
+        painter.drawText(panel_x + 14, panel_y + 80, "[2] STRATEGIC PRIORITY (THEATER MANDATE):")
         
         painter.setFont(self.font_body)
         painter.setPen(QColor(255, 240, 190))
-        painter.drawText(QRectF(panel_x + 14, panel_y + 82, panel_w - 28, 20), int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft), intentions.strategic_priority)
+        painter.drawText(QRectF(panel_x + 14, panel_y + 84, panel_w - 28, 28), int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft), intentions.strategic_priority)
         
         # Tier 3: TACTICAL PRIORITY (Immediate Surroundings / Micro)
         painter.setFont(QFont("DejaVu Sans", 7, QFont.Weight.Bold))
         painter.setPen(QColor(0, 240, 140))
-        painter.drawText(panel_x + 14, panel_y + 112, "[3] TACTICAL PRIORITY (IMMEDIATE SURROUNDINGS):")
+        painter.drawText(panel_x + 14, panel_y + 122, "[3] TACTICAL PRIORITY (IMMEDIATE PHYSICAL SURROUNDINGS):")
         
         painter.setFont(self.font_body)
         painter.setPen(QColor(200, 255, 230))
-        painter.drawText(QRectF(panel_x + 14, panel_y + 124, panel_w - 28, 44), int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft), intentions.tactical_priority)
+        painter.drawText(QRectF(panel_x + 14, panel_y + 128, panel_w - 28, 56), int(Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignLeft), intentions.tactical_priority)
 
         # -------------------------------------------------------------
         # 3. DRAW NATIVE HUD BOUNDING BOXES

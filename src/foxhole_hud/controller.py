@@ -61,6 +61,18 @@ class StrategicControlLoop(threading.Thread):
         with self.lock:
             return list(self.active_boxes)
 
+    def trigger_war_intel_sync(self):
+        async def _query():
+            with self.lock:
+                self.telemetry["mcp_status"] = "SYNCING"
+            res = await self.mcp.get_war_summary("live-1")
+            with self.lock:
+                self.bdi.update_war_intel(res)
+                self.telemetry["mcp_status"] = "SYNCED"
+            self.signals.frame_processed.emit()
+
+        asyncio.run_coroutine_threadsafe(_query(), self.mcp_loop)
+
     def trigger_mcp_lookup(self, item_or_region: str, query_type: str = "recipe"):
         async def _query():
             with self.lock:
@@ -81,13 +93,19 @@ class StrategicControlLoop(threading.Thread):
 
     def run(self):
         print("[Strategic Control Loop] Initialized at 20 FPS...")
-        # Initial MCP baseline check (asynchronous, non-blocking)
-        self.trigger_mcp_lookup("Dunne Transport", "recipe")
+        # Initial live War Intel sync from Foxhole API (asynchronous, non-blocking)
+        self.trigger_war_intel_sync()
+        last_war_sync = time.time()
         
         with mss.MSS() as sct:
             while self.running:
                 t_start = time.time()
                 
+                # Periodically refresh war intel every 60s
+                if time.time() - last_war_sync > 60:
+                    self.trigger_war_intel_sync()
+                    last_war_sync = time.time()
+
                 # 1. Grab 1080p frame buffer via XShm
                 t_cap0 = time.time()
                 sct_img = sct.grab(GAME_REGION)
@@ -100,15 +118,13 @@ class StrategicControlLoop(threading.Thread):
                 cv_ms = (time.time() - t_cv0) * 1000
                 
                 # 3. Store frame telemetry in SQLite metadata store
-                banner_txt = "Fort Viper : Afric's Approach" if cv_state.get("has_banner") else ""
-                cv_state["subregion_text"] = banner_txt
                 player_pos = cv_state.get("player_marker")
                 self.metadata.record_frame(cap_ms, cv_ms, cv_state, player_pos)
                 
                 # 4. BDI Goal Arbitration & Discrepancy Evaluation
                 with self.lock:
                     self.active_boxes = boxes
-                    discrepancy = self.bdi.update_beliefs_from_cv(cv_state, banner_txt)
+                    discrepancy = self.bdi.update_beliefs_from_cv(cv_state)
                     if discrepancy:
                         self.telemetry["is_thinking"] = True
                     else:

@@ -6,14 +6,14 @@ from foxhole_hud.bdi_engine import BDIGoalArbiter
 
 FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
 
-@pytest.mark.parametrize("fixture_filename,expected_mode,expected_goal_fragment,expected_box_label", [
-    ("pedestrian.png", "PEDESTRIAN", "Logistics Relief", "STANCE & STAMINA"),
-    ("vehicle.png", "VEHICLE", "Logistics Relief", "VEHICLE STATUS"),
-    ("spectating.png", "SPECTATING", "Combat Observation", "SPECTATOR CAM"),
-    ("deploy_map.png", "DEPLOY_MAP", "Deployment Selection", "DEPLOYMENT DIRECTORY"),
-    ("map.png", "MAP", "Operational Reconnaissance", "REGIONAL TACTICAL MAP"),
+@pytest.mark.parametrize("fixture_filename,expected_mode,expected_strategic_fragment,expected_box_label", [
+    ("pedestrian.png", "PEDESTRIAN", "Field Operations", "STANCE & STAMINA"),
+    ("vehicle.png", "VEHICLE", "Motorized Operations", "VEHICLE STATUS"),
+    ("spectating.png", "SPECTATING", "Casualty Observation", "SPECTATOR CAM"),
+    ("deploy_map.png", "DEPLOY_MAP", "Theater Reinforcement", "DEPLOYMENT DIRECTORY"),
+    ("map.png", "MAP", "Theater Reconnaissance", "REGIONAL TACTICAL MAP"),
 ])
-def test_all_game_mode_fixtures(fixture_filename, expected_mode, expected_goal_fragment, expected_box_label):
+def test_all_game_mode_fixtures(fixture_filename, expected_mode, expected_strategic_fragment, expected_box_label):
     path = os.path.join(FIXTURE_DIR, fixture_filename)
     assert os.path.exists(path), f"Fixture missing: {path}"
     
@@ -39,8 +39,12 @@ def test_all_game_mode_fixtures(fixture_filename, expected_mode, expected_goal_f
         f"Missing expected box '{expected_box_label}' in {box_labels}"
     )
     
-    # 3. BDI Goal Assertion
+    # 3. Macro Goal Assertion (Live War 141 Conquest)
     goal = arbiter.current_intentions.goal
-    assert expected_goal_fragment.lower() in goal.lower(), (
-        f"Goal mismatch! Expected fragment '{expected_goal_fragment}', got '{goal}'"
+    assert "Active Conquest" in goal
+    
+    # 4. Strategic Priority Assertion
+    strat = arbiter.current_intentions.strategic_priority
+    assert expected_strategic_fragment.lower() in strat.lower(), (
+        f"Strategic priority mismatch! Expected fragment '{expected_strategic_fragment}', got '{strat}'"
     )
