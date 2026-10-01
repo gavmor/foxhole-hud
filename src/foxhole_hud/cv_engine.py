@@ -165,17 +165,29 @@ class FoxholeCVDetector:
                 "color": (0, 220, 255),
                 "tag_pos": "top"
             })
-            # Locate player chevron on full map (strided search)
+            # Locate player orange chevron on full map via strided connected components
             map_crop = bgr[100:980:2, 200:1720:2]
-            mask_player = (map_crop[:, :, 2] > 200) & (map_crop[:, :, 1] > 90) & (map_crop[:, :, 1] < 170) & (map_crop[:, :, 0] < 80)
-            pts = np.argwhere(mask_player)
-            if len(pts) >= 5:
-                py, px = np.mean(pts, axis=0)
-                actual_x = 200 + int(px * 2)
-                actual_y = 100 + int(py * 2)
+            hsv_map = cv2.cvtColor(map_crop, cv2.COLOR_BGR2HSV)
+            mask_chevron = (
+                (hsv_map[:, :, 0] >= 8) & (hsv_map[:, :, 0] <= 16) &
+                (hsv_map[:, :, 1] >= 110) & (hsv_map[:, :, 1] <= 210) &
+                (hsv_map[:, :, 2] >= 110) & (hsv_map[:, :, 2] <= 230)
+            )
+            num, labels, stats, centroids = cv2.connectedComponentsWithStats(mask_chevron.astype(np.uint8))
+            best_cand = None
+            for i in range(1, num):
+                x, y, w, h, area = stats[i]
+                if 5 <= w <= 25 and 5 <= h <= 25 and 10 <= area <= 150:
+                    cx, cy = centroids[i]
+                    best_cand = (200 + int(cx * 2), 100 + int(cy * 2), int(w * 2), int(h * 2))
+                    break
+
+            if best_cand:
+                actual_x, actual_y, w, h = best_cand
                 tactical_state["player_marker"] = (actual_x, actual_y)
+                box_pad = max(int(max(w, h) * 0.8), 20)
                 detected_boxes.append({
-                    "box": [actual_x - 24, actual_y - 24, actual_x + 24, actual_y + 24],
+                    "box": [actual_x - box_pad, actual_y - box_pad, actual_x + box_pad, actual_y + box_pad],
                     "label": "GPS CHEVRON // CURRENT POSITION",
                     "color": (255, 140, 0),
                     "tag_pos": "top"
