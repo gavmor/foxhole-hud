@@ -9,8 +9,8 @@ class FoxholeCVDetector:
     def __init__(self):
         # Precise, non-overlapping calibrated baseline boundaries for 1080p
         self.roi_compass = [1775, 18, 1895, 138]     # Top-right compass
-        self.roi_squads = [1670, 310, 1905, 595]     # Mid-right squad roster (ends above chat)
-        self.roi_chat = [1365, 648, 1905, 930]       # Bottom-right chat log (tabs + text)
+        self.roi_squads = [1670, 310, 1905, 703]     # Regional squad roster (flush to chat tabs)
+        self.roi_chat = [1376, 703, 1905, 1033]      # Communications & chat log (tabs to input bar)
         self.roi_minimap = [0, 756, 324, 1079]       # Bottom-left corner minimap (324x323)
         
     def process_frame(self, bgra_frame):
