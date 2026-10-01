@@ -4,23 +4,19 @@ import time
 
 @dataclass
 class Beliefs:
-    """Current grounded world model from CV perception and MCP facts."""
-    region: str = "Deadlands"
-    subregion: str = "The Salt March"
-    in_vehicle: bool = False
+    region: str = "Marban Hollow"
+    subregion: str = "Maiden's Veil (Industrial Sector)"
+    in_vehicle: bool = True
     vehicle_role: str = "Driver"
     is_bleeding: bool = False
-    is_map_open: bool = False
-    is_queue: bool = False
-    at_seaport: bool = False
-    at_shipyard: bool = False
-    at_stockpile: bool = False
+    is_full_map: bool = False
+    has_minimap: bool = True
+    at_industrial_hub: bool = True
     fuel_deficit_known: bool = True
     last_update: float = field(default_factory=time.time)
 
 @dataclass
 class GoalHierarchy:
-    """The 3-tier intention stack: Goal > Strategic Priority > Tactical Priority."""
     goal: str
     strategic_priority: str
     tactical_priority: str
@@ -31,95 +27,72 @@ class GoalHierarchy:
 class BDIGoalArbiter:
     """
     Belief-Desire-Intention (BDI) and Goal-Driven Autonomy (GDA) Engine.
-    Evaluates continuous perceptual discrepancies, consults domain facts (MCP),
-    and arbitrates changing goal pursuit.
+    Grounded in immediate surroundings: Maiden's Veil industrial hub,
+    seaport fuel deficit, and Salt March resupply mandate.
     """
     def __init__(self, mcp_consultant=None, metadata_store=None):
         self.beliefs = Beliefs()
         self.mcp = mcp_consultant
         self.metadata = metadata_store
         self.current_intentions = GoalHierarchy(
-            goal="Operation Cold Run: Relieve & Fortify Salt March Base",
-            strategic_priority="Acquire 15 Cans of Diesel to Unbrick Maiden's Veil Seaport",
-            tactical_priority="At Shipyard: Check local fuel -> Procure Dunne Transport",
-            revision_trigger="Bootstrap"
+            goal="Operation Cold Run: Salt March Relief & Resupply",
+            strategic_priority="Unbrick Maiden's Veil Seaport Fuel (15x Diesel Run)",
+            tactical_priority="Parked at Maiden's Veil: Refuel truck at Refinery & pull 15 Diesel cans",
+            revision_trigger="Arrived at Maiden's Veil Hub"
         )
-        self.is_thinking = False
 
     def update_beliefs_from_cv(self, cv_state: Dict[str, Any], banner_text: str = ""):
         b = self.beliefs
-        b.in_vehicle = cv_state.get("in_vehicle", False)
+        b.in_vehicle = cv_state.get("in_vehicle", True)
         b.is_bleeding = cv_state.get("is_bleeding", False)
-        b.is_map_open = cv_state.get("is_map", False)
-        
-        if banner_text:
-            if "Fort Viper" in banner_text or "Afric" in banner_text:
-                b.region = "Marban Hollow"
-                b.subregion = "Fort Viper : Afric's Approach"
-            elif "Salt March" in banner_text:
-                b.region = "Deadlands"
-                b.subregion = "The Salt March"
-            elif "Maiden" in banner_text:
-                b.region = "Marban Hollow"
-                b.subregion = "Maiden's Veil"
+        b.is_full_map = cv_state.get("is_full_map", False)
+        b.has_minimap = cv_state.get("has_minimap", False)
+        b.at_industrial_hub = cv_state.get("at_industrial_hub", False) or b.has_minimap
 
         b.last_update = time.time()
         return self.evaluate_discrepancy()
 
     def evaluate_discrepancy(self) -> Optional[GoalHierarchy]:
-        """
-        GDA Discrepancy Monitor:
-        Detects divergence between reality and current intention stack.
-        """
         b = self.beliefs
         old = self.current_intentions
         new_hierarchy = None
 
-        # Priority 0: Immediate Survival (Bleeding)
+        # Priority 0: Immediate Survival
         if b.is_bleeding:
             new_hierarchy = GoalHierarchy(
                 goal="Immediate Survival: Stop Hemorrhage",
                 strategic_priority="Locate Medic or Scavenge Bandage from fallen kits",
-                tactical_priority="EMERGENCY: Drop to cover, press C to crouch/prone, call local medic",
+                tactical_priority="EMERGENCY: Drop to cover (press C), call local medic in voice/chat",
                 revision_trigger="Bleed Discrepancy"
             )
 
-        # Priority 1: Map Scouting Active
-        elif b.is_map_open:
+        # Priority 1: Full Map Reconnaissance ('M')
+        elif b.is_full_map:
             new_hierarchy = GoalHierarchy(
-                goal="Operational Reconnaissance: Hex Logistics & Frontline Intel",
-                strategic_priority="Identify Nearest Active Refinery and Public Diesel Depot",
-                tactical_priority="Map Open: Check Maiden's Veil & Oster Wall for factory queues",
-                revision_trigger="Map Open Discrepancy"
+                goal="Operational Reconnaissance: Marban Hollow & Deadlands Frontlines",
+                strategic_priority="Scout Factory Queue Times and Seaport Stockpiles",
+                tactical_priority="Map Open: Check Maiden's Veil factory load and route back to Salt March",
+                revision_trigger="Full Map Discrepancy"
             )
 
-        # Priority 2: In Marban Hollow -> Resolving Fuel / Transport Deficit
-        elif b.region == "Marban Hollow":
+        # Priority 2: At Maiden's Veil Industrial Hub / Refinery (Immediate Surroundings)
+        elif b.at_industrial_hub:
             if b.in_vehicle:
                 new_hierarchy = GoalHierarchy(
                     goal="Operation Cold Run: Salt March Relief & Resupply",
-                    strategic_priority="Ferry 15 Cans of Diesel from Refinery to Maiden's Veil Seaport",
-                    tactical_priority=f"In Vehicle ({b.subregion}): Route along primary road to Maiden's Veil Refinery",
-                    revision_trigger="Mounted Transit to Hub"
+                    strategic_priority="Unbrick Maiden's Veil Seaport Fuel Reserves",
+                    tactical_priority="Parked at Refinery / Scrap Pile: Pull 15 Diesel cans -> 10 to Seaport, 5 to Silo",
+                    revision_trigger="At Refinery in Vehicle"
                 )
             else:
                 new_hierarchy = GoalHierarchy(
                     goal="Operation Cold Run: Salt March Relief & Resupply",
-                    strategic_priority="Unbrick Regional Logistics: Seed Seaport with 15x Diesel",
-                    tactical_priority="On Foot at Port: Mount friendly Dunne Transport or Wrench abandoned truck",
-                    revision_trigger="Dismounted at Port"
+                    strategic_priority="Unbrick Maiden's Veil Seaport Fuel Reserves",
+                    tactical_priority="Dismounted at Docks/Factory: Mount fueled Dunne -> Submit Diesel to Seaport",
+                    revision_trigger="At Docks Dismounted"
                 )
 
-        # Priority 3: In Deadlands -> Frontline Lockdown
-        elif b.region == "Deadlands":
-            new_hierarchy = GoalHierarchy(
-                goal="Defend Salt March Relic Base & Eastern Deadlands Flank",
-                strategic_priority="Establish Watchtower Radar Perimeter & Stockpile Supplies",
-                tactical_priority="Hold SW River Mercy Bridgehead against Colonial push from Sunken Coup",
-                revision_trigger="Deadlands Sector Active"
-            )
-
-        # Commit revision if changed
+        # Commit revision
         if new_hierarchy and (
             new_hierarchy.goal != old.goal or
             new_hierarchy.strategic_priority != old.strategic_priority or

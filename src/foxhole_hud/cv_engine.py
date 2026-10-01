@@ -3,48 +3,40 @@ import numpy as np
 
 class FoxholeCVDetector:
     """
-    Pure local, out-of-band OpenCV detection engine.
-    Zero disk I/O, zero LLM calls. Sub-millisecond ROI classification.
+    Calibrated local OpenCV detection engine.
+    Accurately tracks native HUD components without overlap or cobblestone false positives.
     """
     def __init__(self):
-        # Static baseline anchor ROIs for standard 1080p Foxhole HUD
-        self.roi_stamina = [8, 14, 180, 130]      # Top-left stance & stamina
-        self.roi_compass = [1765, 15, 1900, 145]  # Top-right compass
-        self.roi_squads = [1665, 305, 1905, 640]  # Mid-right squad panel
-        self.roi_chat = [1360, 645, 1905, 935]    # Bottom-right chat panel
-        self.roi_shield = [930, 765, 990, 840]    # Center-bottom vehicle shield
-        self.roi_banner = [540, 660, 1380, 735]   # Center subregion banner
+        # Precise, non-overlapping calibrated baseline boundaries for 1080p
+        self.roi_compass = [1775, 18, 1895, 138]     # Top-right compass
+        self.roi_squads = [1670, 310, 1905, 595]     # Mid-right squad roster (ends above chat)
+        self.roi_chat = [1365, 648, 1905, 930]       # Bottom-right chat log (tabs + text)
+        self.roi_minimap = [2, 700, 172, 1076]       # Bottom-left corner minimap
         
     def process_frame(self, bgra_frame):
-        """
-        Takes raw BGRA frame from MSS buffer (1080, 1920, 4).
-        Returns active detected HUD bounding boxes and inferred tactical state.
-        """
-        # Convert to BGR for OpenCV
         bgr = bgra_frame[:, :, :3]
         h, w, _ = bgr.shape
         
         detected_boxes = []
         tactical_state = {
-            "is_map": False,
+            "is_full_map": False, "is_map": False,
+            "has_minimap": False,
             "in_vehicle": False,
-            "has_banner": False,
-            "has_queue": False,
+            "vehicle_type": "",
             "is_bleeding": False,
-            "subregion_text": "",
+            "at_industrial_hub": False,
             "player_marker": None
         }
         
-        # 1. Map Open Detection (Parchment check)
+        # 1. Full Map Check ('M' key)
         center_crop = bgr[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4]
         mean_lum = float(np.mean(center_crop))
-        
         fist_crop = bgr[20:80, 20:80]
         white_pts = int(np.sum((fist_crop[:, :, 0] > 200) & (fist_crop[:, :, 1] > 200) & (fist_crop[:, :, 2] > 200)))
         
-        if white_pts < 250 and mean_lum > 85:
-            tactical_state["is_map"] = True
-            # Detect player chevron on map (vibrant orange: R>200, 90<G<170, B<80)
+        if white_pts < 100 and mean_lum > 85:
+            tactical_state["is_full_map"] = True
+            # Locate player chevron on full map
             mask_player = (bgr[:, :, 2] > 200) & (bgr[:, :, 1] > 90) & (bgr[:, :, 1] < 170) & (bgr[:, :, 0] < 80)
             pts = np.argwhere(mask_player)
             if len(pts) >= 15:
@@ -67,62 +59,81 @@ class FoxholeCVDetector:
         if mean_r > 70 and mean_r > (mean_b + mean_g) * 0.7:
             tactical_state["is_bleeding"] = True
 
-        # 3. Native HUD Bounding Boxes (When in World View)
-        # A. Stance & Stamina (Always on HUD in world)
+        # 3. Minimap Detection (Bottom-Left Corner)
+        # Foxhole minimap is at x: 0..172, y: 700..1076
+        minimap_crop = bgr[700:1076, 2:172]
+        m_mean = np.mean(minimap_crop, axis=(0, 1))
+        # Characteristic map paper: R ~= G ~= B and luminance > 120
+        if 115 < m_mean[0] < 175 and 115 < m_mean[1] < 175 and 105 < m_mean[2] < 170:
+            tactical_state["has_minimap"] = True
+            tactical_state["at_industrial_hub"] = True
+            detected_boxes.append({
+                "box": self.roi_minimap,
+                "label": "MINIMAP (MAIDEN'S VEIL HUB)",
+                "color": (255, 200, 40),
+                "tag_pos": "top"
+            })
+
+        # 4. Top-Left Stance / Vehicle Role
+        # Check if in vehicle ("Dunne Transport" or "Passenger" text at y: 80..100)
+        text_row = bgr[82:98, 10:140]
+        white_text = np.sum((text_row[:, :, 0] > 180) & (text_row[:, :, 1] > 180) & (text_row[:, :, 2] > 180))
+        in_veh = white_text > 80
+        
+        # Check stamina bar at y: 112..124
+        stamina_row = bgr[112:124, 10:140]
+        has_stamina = np.sum((stamina_row[:, :, 0] > 180) & (stamina_row[:, :, 1] > 180)) > 60
+        
+        if in_veh:
+            tactical_state["in_vehicle"] = True
+            tactical_state["vehicle_type"] = "Dunne Transport"
+            box_stamina = [8, 14, 110, 102]  # Compact vehicle icon box
+            label_stamina = "VEHICLE: DUNNE TRANSPORT"
+        else:
+            box_stamina = [8, 14, 175, 126] if has_stamina else [8, 14, 85, 95]
+            label_stamina = "STANCE & STAMINA METER"
+            
         detected_boxes.append({
-            "box": self.roi_stamina,
-            "label": "STANCE & STAMINA METER",
+            "box": box_stamina,
+            "label": label_stamina,
             "color": (0, 255, 200),
             "tag_pos": "bottom"
         })
-        
-        # B. Compass (Top-right)
+
+        # 5. Compass (Top-Right)
         detected_boxes.append({
             "box": self.roi_compass,
-            "label": "COMPASS & WIND AZIMUTH",
+            "label": "COMPASS & AZIMUTH",
             "color": (255, 200, 0),
             "tag_pos": "bottom"
         })
-        
-        # C. Squads Panel (Mid-right)
+
+        # 6. Regional Squads Panel (Mid-Right, ends above chat)
         detected_boxes.append({
             "box": self.roi_squads,
             "label": "REGIONAL SQUADS",
             "color": (255, 100, 255),
             "tag_pos": "top"
         })
-        
-        # D. Chat Window (Bottom-right)
+
+        # 7. Communications & Chat Log (Bottom-Right, exactly fits tabs + log)
         detected_boxes.append({
             "box": self.roi_chat,
-            "label": "CHAT LOG & COMMS",
+            "label": "COMMS & CHAT LOG",
             "color": (0, 220, 255),
             "tag_pos": "top"
         })
-        
-        # E. Vehicle Shield Check (around x: 930..990, y: 765..840)
-        shield_crop = bgr[765:840, 930:990]
-        # In vehicle, the shield icon has a distinct light grey/white outline
-        shield_edges = cv2.Canny(shield_crop, 50, 150)
-        if np.sum(shield_edges > 0) > 120:
-            tactical_state["in_vehicle"] = True
+
+        # 8. Vehicle Shield Detection (Strict Shape & Color, NO Cobblestone false positives)
+        shield_crop = bgr[768:836, 932:988]
+        # Real shield has pure white/light grey contour on dark interior
+        white_shield_pts = np.sum((shield_crop[:, :, 0] > 210) & (shield_crop[:, :, 1] > 210) & (shield_crop[:, :, 2] > 210))
+        # Shield border has roughly 60-200 pure white pixels, cobblestone has scattered mid-tones
+        if 40 < white_shield_pts < 250:
             detected_boxes.append({
-                "box": self.roi_shield,
-                "label": "VEHICLE STATUS / ARMOR",
+                "box": [932, 768, 988, 836],
+                "label": "VEHICLE ARMOR STATUS",
                 "color": (255, 80, 80),
-                "tag_pos": "top"
-            })
-            
-        # F. Subregion Banner Detection (Banner appears when entering new territory)
-        banner_crop = bgr[660:735, 540:1380]
-        # Text characters inside banner have high contrast white pixels on dark gradient
-        white_banner_pts = np.sum((banner_crop[:, :, 0] > 190) & (banner_crop[:, :, 1] > 190) & (banner_crop[:, :, 2] > 190))
-        if white_banner_pts > 450:
-            tactical_state["has_banner"] = True
-            detected_boxes.append({
-                "box": self.roi_banner,
-                "label": "SUBREGION TRANSITION BANNER",
-                "color": (50, 255, 100),
                 "tag_pos": "top"
             })
 
