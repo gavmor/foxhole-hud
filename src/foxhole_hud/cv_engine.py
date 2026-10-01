@@ -11,7 +11,7 @@ class FoxholeCVDetector:
         self.roi_compass = [1775, 18, 1895, 138]     # Top-right compass
         self.roi_squads = [1670, 310, 1905, 595]     # Mid-right squad roster (ends above chat)
         self.roi_chat = [1365, 648, 1905, 930]       # Bottom-right chat log (tabs + text)
-        self.roi_minimap = [2, 700, 172, 1076]       # Bottom-left corner minimap
+        self.roi_minimap = [0, 756, 324, 1079]       # Bottom-left corner minimap (324x323)
         
     def process_frame(self, bgra_frame):
         bgr = bgra_frame[:, :, :3]
@@ -59,17 +59,38 @@ class FoxholeCVDetector:
         if mean_r > 70 and mean_r > (mean_b + mean_g) * 0.7:
             tactical_state["is_bleeding"] = True
 
-        # 3. Minimap Detection (Bottom-Left Corner)
-        # Foxhole minimap is at x: 0..172, y: 700..1076
-        minimap_crop = bgr[700:1076, 2:172]
+        # 3. Minimap Detection (Bottom-Left Corner: 324x323 at [0, 756, 324, 1079])
+        minimap_crop = bgr[756:1079, 0:324]
         m_mean = np.mean(minimap_crop, axis=(0, 1))
-        # Characteristic map paper: R ~= G ~= B and luminance > 120
-        if 115 < m_mean[0] < 175 and 115 < m_mean[1] < 175 and 105 < m_mean[2] < 170:
+        # Characteristic map paper: R ~= G ~= B and luminance > 110
+        if 110 < m_mean[0] < 175 and 110 < m_mean[1] < 175 and 100 < m_mean[2] < 175:
             tactical_state["has_minimap"] = True
             tactical_state["at_industrial_hub"] = True
+            
+            # Detect player chevron on minimap to establish immediate surroundings
+            hsv_mini = cv2.cvtColor(minimap_crop, cv2.COLOR_BGR2HSV)
+            mask1 = cv2.inRange(hsv_mini, (10, 140, 170), (25, 255, 255))
+            mask2 = (minimap_crop[:, :, 2] > 200) & (minimap_crop[:, :, 1] > 90) & (minimap_crop[:, :, 1] < 170) & (minimap_crop[:, :, 0] < 90)
+            c_pts = np.argwhere(mask1 | mask2)
+            
+            subregion = "Maiden's Veil Industrial Hub"
+            if len(c_pts) >= 5:
+                cy, cx = np.mean(c_pts, axis=0)
+                tactical_state["player_marker"] = (int(cx), int(756 + cy))
+                if cx < 135:
+                    subregion = "Maiden's Veil Seaport / Docks (West)"
+                elif cx > 195:
+                    subregion = "Maiden's Veil Refinery / Scrap Yard (East)"
+                elif cy < 155:
+                    subregion = "Maiden's Veil Town Base / Relic (North)"
+                else:
+                    subregion = "Maiden's Veil Factory / Logistics Depot (South)"
+            
+            tactical_state["subregion"] = subregion
+            
             detected_boxes.append({
                 "box": self.roi_minimap,
-                "label": "MINIMAP (MAIDEN'S VEIL HUB)",
+                "label": f"MINIMAP // {subregion.upper()}",
                 "color": (255, 200, 40),
                 "tag_pos": "top"
             })
@@ -80,17 +101,14 @@ class FoxholeCVDetector:
         white_text = np.sum((text_row[:, :, 0] > 180) & (text_row[:, :, 1] > 180) & (text_row[:, :, 2] > 180))
         in_veh = white_text > 80
         
-        # Check stamina bar at y: 112..124
-        stamina_row = bgr[112:124, 10:140]
-        has_stamina = np.sum((stamina_row[:, :, 0] > 180) & (stamina_row[:, :, 1] > 180)) > 60
-        
         if in_veh:
             tactical_state["in_vehicle"] = True
             tactical_state["vehicle_type"] = "Dunne Transport"
-            box_stamina = [8, 14, 110, 102]  # Compact vehicle icon box
+            box_stamina = [16, 16, 190, 110]
             label_stamina = "VEHICLE: DUNNE TRANSPORT"
         else:
-            box_stamina = [8, 14, 175, 126] if has_stamina else [8, 14, 85, 95]
+            # Calibrated to cover stance icon (y:20..85) and stamina meter (y:124..136)
+            box_stamina = [16, 16, 155, 142]
             label_stamina = "STANCE & STAMINA METER"
             
         detected_boxes.append({

@@ -41,8 +41,23 @@ def test_bdi_goal_arbitration_hierarchy():
     assert "Immediate Survival" in rev_bleed.goal
     assert "EMERGENCY" in rev_bleed.tactical_priority
 
-    # 3. Simulate arrival at industrial hub in vehicle
-    rev_hub = arbiter.update_beliefs_from_cv({"at_industrial_hub": True, "in_vehicle": True})
+    # 3. Simulate arrival at Seaport on foot (empty Dunnes)
+    rev_seaport = arbiter.update_beliefs_from_cv({
+        "at_industrial_hub": True,
+        "subregion": "Maiden's Veil Seaport / Docks (West)",
+        "in_vehicle": False
+    })
+    assert rev_seaport is not None
+    assert "Seaport" in rev_seaport.tactical_priority
+    assert "Sprint to Refinery" in rev_seaport.tactical_priority
+    assert "Fuel Crisis" in rev_seaport.strategic_priority
+
+    # 4. Simulate arrival at industrial hub in vehicle
+    rev_hub = arbiter.update_beliefs_from_cv({
+        "at_industrial_hub": True,
+        "subregion": "Maiden's Veil (Industrial Sector)",
+        "in_vehicle": True
+    })
     assert rev_hub is not None
     assert "Refinery" in rev_hub.tactical_priority
     assert "Fuel" in rev_hub.strategic_priority
