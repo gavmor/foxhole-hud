@@ -35,23 +35,25 @@ class FoxholeCVDetector:
         # -------------------------------------------------------------
         # 1. INSTANT 5-WAY MODE RECOGNITION (< 1ms)
         # -------------------------------------------------------------
-        # A. Map Parchment Canvas Check
-        # When tactical map ('M') or Deploy Map is open, Foxhole displays a large parchment canvas.
-        center_roi = bgr[200:800, 400:1500]
+        # A. Sprint Stamina Bar check at [124:136, 22:145]
+        # In Foxhole, when on foot as a pedestrian, the stamina bar is a solid bright white bar (>1000 px).
+        # Neither Vehicle, nor Map, nor Deploy Map, nor Spectating ever displays this sprint stamina bar.
+        stamina_row = bgr[124:136, 22:145]
+        white_stamina = int(np.sum((stamina_row[:, :, 0] > 200) & (stamina_row[:, :, 1] > 200) & (stamina_row[:, :, 2] > 200)))
+
+        # B. Map Parchment Canvas Check (strided 4x for sub-millisecond check)
+        center_roi = bgr[200:800:4, 400:1500:4]
         parchment_pct = float(np.mean((center_roi[:, :, 0] > 110) & (center_roi[:, :, 1] > 125) & (center_roi[:, :, 2] > 125)))
 
-        # B. Deploy Map check (sidebar has dark panel and 'CONQUEST' header)
+        # C. Deploy Map check (sidebar has dark panel and 'CONQUEST' header)
         conquest_crop = bgr[90:130, 20:180]
         gray_c = cv2.cvtColor(conquest_crop, cv2.COLOR_BGR2GRAY)
         mask_c = gray_c > 180
         num_c, _, stats_c, _ = cv2.connectedComponentsWithStats(mask_c.astype(np.uint8))
         letters_c = [s for s in stats_c[1:] if 7 <= s[3] <= 18 and 4 <= s[2] <= 18]
-        sidebar_dark = float(np.mean(bgr[100:400, 20:340])) < 80
-        is_deploy = (len(letters_c) >= 6 and sidebar_dark and int(np.sum(mask_c)) < 1200)
-
-        # C. Sprint Stamina Bar check at [124:136, 22:145] (Pedestrian)
-        stamina_row = bgr[124:136, 22:145]
-        white_stamina = int(np.sum((stamina_row[:, :, 0] > 200) & (stamina_row[:, :, 1] > 200) & (stamina_row[:, :, 2] > 200)))
+        sidebar_dark = float(np.mean(bgr[100:400:2, 20:340:2])) < 80
+        conquest_white = int(np.sum(mask_c))
+        is_deploy = (parchment_pct > 0.40 and sidebar_dark and len(letters_c) >= 6 and conquest_white < 1200)
 
         # D. Vehicle widgets (silhouette at [30:88, 30:90] or armor shield)
         veh_crop = bgr[30:88, 30:90]
@@ -61,36 +63,36 @@ class FoxholeCVDetector:
         has_shield = (35 < white_shield < 250)
 
         # E. Spectator mode check (banner at [20:120, 700:1220])
-        # In spectator cam: banner text is white on a dark background (dark_ratio > 0.55),
-        # with bounded glyph white pixels (500..5000), not parchment background (>20,000).
         spec_crop = bgr[20:120, 700:1220]
         gray_s = cv2.cvtColor(spec_crop, cv2.COLOR_BGR2GRAY)
         mask_s = gray_s > 180
         num_s, _, stats_s, _ = cv2.connectedComponentsWithStats(mask_s.astype(np.uint8))
         spec_letters = [s for s in stats_s[1:] if 6 <= s[3] <= 30 and 4 <= s[2] <= 30]
-        dark_ratio = float(np.mean(gray_s < 100))
+        spec_dark_bg = float(np.mean(gray_s < 100))
         spec_white = int(np.sum(mask_s))
-        is_spectating = (dark_ratio > 0.55 and 500 <= spec_white <= 5000 and len(spec_letters) >= 10 and parchment_pct < 0.20)
+        is_spectating = (spec_dark_bg > 0.60 and 800 <= spec_white <= 4000 and len(spec_letters) >= 12 and parchment_pct < 0.20)
 
-        # Hierarchical Assignment:
-        if is_deploy:
-            current_mode = "DEPLOY_MAP"
-        elif parchment_pct > 0.35:
-            current_mode = "MAP"
-        elif white_stamina > 500:
+        # F. Minimap detection
+        minimap_crop = bgr[756:1079:2, 0:324:2]
+        m_mean = np.mean(minimap_crop, axis=(0, 1))
+        has_minimap = (40 < m_mean[0] < 175 and 50 < m_mean[1] < 175 and 50 < m_mean[2] < 175)
+
+        # Deterministic Hierarchy:
+        if white_stamina > 500:
             current_mode = "PEDESTRIAN"
-        elif veh_white > 400 or has_shield:
+        elif parchment_pct > 0.40:
+            if is_deploy:
+                current_mode = "DEPLOY_MAP"
+            else:
+                current_mode = "MAP"
+        elif veh_white > 1000 or has_shield:
             current_mode = "VEHICLE"
         elif is_spectating:
             current_mode = "SPECTATING"
+        elif has_minimap and parchment_pct < 0.20:
+            current_mode = "PEDESTRIAN"
         else:
-            # Fallback for pedestrian when stamina is exhausted or map view
-            minimap_crop = bgr[756:1079, 0:324]
-            m_mean = np.mean(minimap_crop, axis=(0, 1))
-            if 100 < m_mean[0] < 175 and 100 < m_mean[1] < 175 and 90 < m_mean[2] < 175:
-                current_mode = "PEDESTRIAN"
-            else:
-                current_mode = "MAP"
+            current_mode = "MAP"
 
         tactical_state["mode"] = current_mode
         tactical_state["is_spectating"] = (current_mode == "SPECTATING")
@@ -163,14 +165,17 @@ class FoxholeCVDetector:
                 "color": (0, 220, 255),
                 "tag_pos": "top"
             })
-            # Locate player chevron on full map
-            mask_player = (bgr[:, :, 2] > 200) & (bgr[:, :, 1] > 90) & (bgr[:, :, 1] < 170) & (bgr[:, :, 0] < 80)
+            # Locate player chevron on full map (strided search)
+            map_crop = bgr[100:980:2, 200:1720:2]
+            mask_player = (map_crop[:, :, 2] > 200) & (map_crop[:, :, 1] > 90) & (map_crop[:, :, 1] < 170) & (map_crop[:, :, 0] < 80)
             pts = np.argwhere(mask_player)
-            if len(pts) >= 15:
+            if len(pts) >= 5:
                 py, px = np.mean(pts, axis=0)
-                tactical_state["player_marker"] = (int(px), int(py))
+                actual_x = 200 + int(px * 2)
+                actual_y = 100 + int(py * 2)
+                tactical_state["player_marker"] = (actual_x, actual_y)
                 detected_boxes.append({
-                    "box": [int(px) - 24, int(py) - 24, int(px) + 24, int(py) + 24],
+                    "box": [actual_x - 24, actual_y - 24, actual_x + 24, actual_y + 24],
                     "label": "GPS CHEVRON // CURRENT POSITION",
                     "color": (255, 140, 0),
                     "tag_pos": "top"

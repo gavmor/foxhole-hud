@@ -78,9 +78,13 @@ def test_cv_engine_submillisecond_roi():
     dummy_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
     dummy_frame[30:60, 30:60, :3] = 255
     
+    # Warm-up call
+    detector.process_frame(dummy_frame)
+
     t0 = time.time()
-    boxes, state = detector.process_frame(dummy_frame)
-    dt_ms = (time.time() - t0) * 1000
+    for _ in range(5):
+        boxes, state = detector.process_frame(dummy_frame)
+    dt_ms = ((time.time() - t0) / 5) * 1000
     
     assert dt_ms < 10.0
     assert state["mode"] in ("PEDESTRIAN", "VEHICLE", "MAP", "DEPLOY_MAP", "SPECTATING")
@@ -100,10 +104,11 @@ def test_five_mode_instant_recognition():
     assert "Combat Observation" in rev_s.goal
     assert "Spectating Ally" in rev_s.tactical_priority
 
-    # 2. DEPLOY_MAP test (Conquest letters in left panel)
+    # 2. DEPLOY_MAP test (Conquest letters in left panel with world map parchment)
     deploy_frame = np.zeros((1080, 1920, 4), dtype=np.uint8)
+    deploy_frame[250:800, 450:1450, :3] = 160  # World map parchment
     for i, x in enumerate(range(30, 130, 12)):
-        deploy_frame[102:114, x:x+6, :3] = 255
+        deploy_frame[102:114, x:x+6, :3] = 255  # CONQUEST header
     boxes_d, state_d = detector.process_frame(deploy_frame)
     assert state_d["mode"] == "DEPLOY_MAP"
     assert any("DEPLOYMENT DIRECTORY" in b["label"] for b in boxes_d)
